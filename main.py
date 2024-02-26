@@ -6,6 +6,8 @@ from os.path import join as path_join
 import subprocess
 import os
 
+from disjoint_sets import split_to_disjoint_sets, GroupMembers
+
 # Conditional Access Constraint Solver for Gaps
 # CACSFG
 
@@ -47,6 +49,11 @@ def read_policy_file(args, path):
       print(f'{path} is set to report only, skipping. Use --include-report-only to include.')
     return policy
 
+def get_policy_defs(args):
+  with open(mk_ca_path(args)) as in_f:
+    ca = json.load(in_f)
+    return ca['value']
+
 def run_cmd(cmd_string):
   subprocess.run(cmd_string, shell=True, capture_output=True)
 
@@ -58,17 +65,13 @@ def fetch_ca_policy(args):
 
 def list_referred_groups_roles(args):
   groups, roles = [], []
-  with open(mk_ca_path(args)) as in_f:
-    ca = json.load(in_f)
-    ca_policy_defs = ca['value']
-
-    for ca_policy in ca_policy_defs:
-      user_targeting = ca_policy['conditions']['users']
-      groups.extend(user_targeting.get('includeGroups', []))
-      roles.extend(user_targeting.get('includeRoles', []))
-      groups.extend(user_targeting.get('excludeGroups', []))
-      roles.extend(user_targeting.get('excludeRoles', []))
-      # TODO: include/excludeGuestsOrExternalUsers missing
+  for ca_policy in get_policy_defs(args):
+    user_targeting = ca_policy['conditions']['users']
+    groups.extend(user_targeting.get('includeGroups', []))
+    roles.extend(user_targeting.get('includeRoles', []))
+    groups.extend(user_targeting.get('excludeGroups', []))
+    roles.extend(user_targeting.get('excludeRoles', []))
+    # TODO: include/excludeGuestsOrExternalUsers missing
 
   return set(groups), set(roles)
 
@@ -104,35 +107,71 @@ def resolve_members_for_policy_objects(args):
   memberships = {}
   all_users = get_members(mk_all_users_path(args))
 
-  with open(mk_ca_path(args)) as in_f:
-    ca = json.load(in_f)
-    ca_policy_defs = ca['value']
-    for ca_policy in ca_policy_defs:
-      user_targeting = ca_policy['conditions']['users']
-      included = set()
-      if user_targeting['includeUsers'] == ['All']:
-        included = all_users
-      else:
-        for includedRoleId in user_targeting['includeRoles']:
-          included = included | get_members(mk_role_result_path(args, includedRoleId))
-        for includedGroupId in user_targeting['includeGroups']:
-          included = included | get_members(mk_group_result_path(args, includedGroupId))
-        for includedUserId in user_targeting['includeUsers']:
-          included.add(includedUserId)
-        # FIXME: check includeGuestsOrExternalUsers
-      
-      for excludedRoleId in user_targeting['excludeRoles']:
-        included = included - get_members(mk_role_result_path(args, excludedRoleId))
-      for excludedGroupId in user_targeting['excludeGroups']:
-        included = included - get_members(mk_group_result_path(args, excludedGroupId))
-      for excludedUserId in user_targeting['excludeUsers']:
-        # User can be already excluded through previous methods
-        if excludedUserId in included:
-          included.remove(excludedUserId)
-      # FIXME: check excludeGuestsOrExternalUsers
+  for ca_policy in get_policy_defs(args):
+    user_targeting = ca_policy['conditions']['users']
+    included = set()
+    if user_targeting['includeUsers'] == ['All']:
+      included = all_users
+    else:
+      for includedRoleId in user_targeting['includeRoles']:
+        included = included | get_members(mk_role_result_path(args, includedRoleId))
+      for includedGroupId in user_targeting['includeGroups']:
+        included = included | get_members(mk_group_result_path(args, includedGroupId))
+      for includedUserId in user_targeting['includeUsers']:
+        included.add(includedUserId)
+      # FIXME: check includeGuestsOrExternalUsers
+    
+    for excludedRoleId in user_targeting['excludeRoles']:
+      included = included - get_members(mk_role_result_path(args, excludedRoleId))
+    for excludedGroupId in user_targeting['excludeGroups']:
+      included = included - get_members(mk_group_result_path(args, excludedGroupId))
+    for excludedUserId in user_targeting['excludeUsers']:
+      # User can be already excluded through previous methods
+      if excludedUserId in included:
+        included.remove(excludedUserId)
+    # FIXME: check excludeGuestsOrExternalUsers
 
-      memberships[ca_policy['id']] = included
+    memberships[ca_policy['id']] = included
   return memberships
+
+def create_model(args, policy_memberships):
+  task = [GroupMembers(name=policy_id, members=members)
+          for policy_id, members in policy_memberships.items()]
+  policy_groups, disjoint_artificial_groups = split_to_disjoint_sets(task)
+
+  group_bool_vars = {gid: cp.boolvar(name='AG%s' % gid) for gid in disjoint_artificial_groups.keys()}
+  #control_vars = {
+  #  'mfa': cp.boolvar(name='MFA'),
+  #  'block': cp.boolvar(name='Block')
+  #}
+  control_vars = {n: cp.boolvar(name=n) for n in ['mfa', 'block']}
+
+  model = []
+  for ca_policy in get_policy_defs(args):
+    grant_controls = ca_policy['grantControls']
+    built_in = grant_controls['builtInControls']
+    if len(set(built_in) - set(['mfa', 'block'])) > 0:
+      print('Skipping CA with control: %s' % str(built_in))
+      continue
+    import IPython; IPython.embed()
+    controls = []
+    for cid in built_in:
+      a = control_vars[cid] # Python 3.8.10 bug? Can't get item from control_vars dict but works in IPython?
+      controls.append(a)
+
+    combinator = cp.any if grant_controls['operator'] == 'OR' else cp.all
+    control_vars = combinator(controls)
+    policy_id = ca_policy['id']
+
+    if not policy_groups[policy_id]:
+      # Policy targets nobody. Does even less than audit mode.
+      continue
+    user_requirement = cp.any([group_bool_vars[gid] for gid in policy_groups[policy_id]])
+
+    model.append(user_requirement.implies(controls))
+    import IPython; IPython.embed()
+
+  return cp.Model(*model)
 
 def main():
   args = parser.parse_args()
@@ -141,10 +180,8 @@ def main():
   fetch_ca_policy(args)
   resolve_memberships_with_query(args)
   fetch_all_users(args)
-  memberships = resolve_members_for_policy_objects(args)
-
-  import IPython; IPython.embed()
-  # print(policy_set)
+  policy_memberships = resolve_members_for_policy_objects(args)
+  model = create_model(args, policy_memberships)
 
 
 if __name__ == '__main__':

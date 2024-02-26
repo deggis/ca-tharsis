@@ -53,7 +53,8 @@ def split_to_disjoint_sets(groups: [GroupMembers]):
         tg.artificialGroups.append(new_group_id)
         tg.unreferencedMembers = tg.unreferencedMembers - new_group_member_ids
 
-  return (task_groups, artificial_groups)
+  plain_groups = {g.name: g.artificialGroups for g in task_groups}
+  return (plain_groups, artificial_groups)
 
 def main():
   # all_users = set(range(1,23))
@@ -73,6 +74,5 @@ def main():
 
   task_groups, artificial_groups = split_to_disjoint_sets(groups)
 
-  import IPython; IPython.embed()
-
-main()
+if __name__ == '__main__':
+  main()
