@@ -1,12 +1,40 @@
-import cpmpy as cp
 import argparse
 import glob
 import json
 from os.path import join as path_join
 import subprocess
 import os
+from functools import cache
+
+import cpmpy as cp
+import pandas as pd
 
 from disjoint_sets import split_to_disjoint_sets, GroupMembers
+from collections import namedtuple
+from common_apps import common_apps
+
+# "Look How They Massacred My Boy"
+PolicyModel = namedtuple('PolicyModel', [
+  'id',
+  # General information to help reporting
+  'name',
+  'members',
+  'enabled',
+  # Conditions
+  'condition_usergroups',
+  'condition_applications',
+  'condition_application_user_action',
+  # Controls
+  'grant_operator', # And, Or, Block, None
+  'grant_builtin_controls'
+])
+
+GeneralInfo = namedtuple('GeneralInfo', [
+  'disjoint_artificial_user_groups',
+  'disjoint_artificial_app_groups',
+  'seen_builtin_controls',
+  'seen_app_user_actions'
+])
 
 # Conditional Access Constraint Solver for Gaps
 # CACSFG
@@ -24,6 +52,10 @@ mk_group_result_path = lambda args, group_id: os.path.join(args.work_dir, f'grou
 mk_role_result_path = lambda args, role_id: os.path.join(args.work_dir, f'role_{role_id}.json')
 mk_all_users_path = lambda args: os.path.join(args.work_dir, 'all_users.json')
 
+META_APP_ALL_UNMETIONED_APPS = "RestOfTheApps"
+MICROSOFT_ADMIN_PORTALS_APP = "MicrosoftAdminPortals"
+
+"""
 def old():
   mfaRequired = cp.boolvar(name='MFARequired')
   controlApplied = cp.boolvar(name='ControlApplied')
@@ -41,6 +73,7 @@ def old():
     compliantDevice.implies(controlApplied),
     ~controlApplied
   )
+"""
 
 def read_policy_file(args, path):
   with open(path) as in_f:
@@ -102,10 +135,32 @@ def get_members(path):
     else:
       return set([v['id'] for v in user_data['value']])
 
-def resolve_members_for_policy_objects(args):
+@cache
+def translate_app_guid(app_id):
+  translation = common_apps.get(app_id)
+  if translation:
+    return translation
+  else:
+    return app_id
+
+def get_translated_app_conds(conds, key):
+  return set([translate_app_guid(aid) for aid in conds[key] if aid not in ['All', 'None']])
+
+def get_all_referenced_apps(args):
+  apps = set()
+  for ca_policy in get_policy_defs(args):
+    app_conds = ca_policy['conditions']['applications']
+    apps.update(get_translated_app_conds(app_conds, 'excludeApplications'))
+    apps.update(get_translated_app_conds(app_conds, 'includeApplications'))
+  if 'All' in apps:
+    apps.remove('All')
+  if 'None' in apps:
+    apps.remove('None')
+  return apps
+
+def resolve_members_for_policy_objects(args, all_users):
   # policy_id guid: set of user guids (lowercase)
   memberships = {}
-  all_users = get_members(mk_all_users_path(args))
 
   for ca_policy in get_policy_defs(args):
     user_targeting = ca_policy['conditions']['users']
@@ -114,17 +169,17 @@ def resolve_members_for_policy_objects(args):
       included = all_users
     else:
       for includedRoleId in user_targeting['includeRoles']:
-        included = included | get_members(mk_role_result_path(args, includedRoleId))
+        included |= get_members(mk_role_result_path(args, includedRoleId))
       for includedGroupId in user_targeting['includeGroups']:
-        included = included | get_members(mk_group_result_path(args, includedGroupId))
+        included |= get_members(mk_group_result_path(args, includedGroupId))
       for includedUserId in user_targeting['includeUsers']:
         included.add(includedUserId)
       # FIXME: check includeGuestsOrExternalUsers
     
     for excludedRoleId in user_targeting['excludeRoles']:
-      included = included - get_members(mk_role_result_path(args, excludedRoleId))
+      included |= get_members(mk_role_result_path(args, excludedRoleId))
     for excludedGroupId in user_targeting['excludeGroups']:
-      included = included - get_members(mk_group_result_path(args, excludedGroupId))
+      included |= get_members(mk_group_result_path(args, excludedGroupId))
     for excludedUserId in user_targeting['excludeUsers']:
       # User can be already excluded through previous methods
       if excludedUserId in included:
@@ -134,44 +189,182 @@ def resolve_members_for_policy_objects(args):
     memberships[ca_policy['id']] = included
   return memberships
 
-def create_model(args, policy_memberships):
-  task = [GroupMembers(name=policy_id, members=members)
-          for policy_id, members in policy_memberships.items()]
-  policy_groups, disjoint_artificial_groups = split_to_disjoint_sets(task)
+def resolve_apps_for_policy_objects(args, all_apps):
+  memberships = {}
 
-  group_bool_vars = {gid: cp.boolvar(name='AG%s' % gid) for gid in disjoint_artificial_groups.keys()}
-  #control_vars = {
-  #  'mfa': cp.boolvar(name='MFA'),
-  #  'block': cp.boolvar(name='Block')
-  #}
-  control_vars = {n: cp.boolvar(name=n) for n in ['mfa', 'block']}
+  for ca_policy in get_policy_defs(args):
+    app_conds = ca_policy['conditions']['applications']
+    included = set()
+    if app_conds['includeApplications'] == ['All']:
+      # if includeApplications==All, we include all referenced + META_APP_ALL_UNMETIONED_APPS
+      included = all_apps
+    elif app_conds['includeApplications'] == ['None']:
+      # should maybe warn here. this is not useful.
+      included = set()
+    if app_conds['includeApplications']:
+      included |= get_translated_app_conds(app_conds, 'includeApplications')
+    if app_conds.get('excludeApplications'):
+      included |= get_translated_app_conds(app_conds, 'excludeApplications')
+    memberships[ca_policy['id']] = included
+  return memberships  
 
-  model = []
+def create_policymodels(args):
+  # Users
+  all_users = get_members(mk_all_users_path(args))
+  policy_user_memberships = resolve_members_for_policy_objects(args, all_users)
+  policy_user_memberships['all_meta'] = set(all_users)
+
+  users_task = [GroupMembers(name=policy_id, members=members)
+      for policy_id, members in policy_user_memberships.items()]
+  policy_user_groups, dja_user_groups = split_to_disjoint_sets(users_task)
+
+  # Applications
+  all_apps = get_all_referenced_apps(args)
+  all_apps.add(META_APP_ALL_UNMETIONED_APPS)
+  all_apps.add(MICROSOFT_ADMIN_PORTALS_APP)  # make sure this is in separately
+  policy_app_memberships = resolve_apps_for_policy_objects(args, all_apps)
+  apps_task = [GroupMembers(name=policy_id, members=members)
+      for policy_id, members in policy_app_memberships.items()]
+  policy_app_groups, dja_app_groups = split_to_disjoint_sets(apps_task)
+
+  seen_builtin_controls = set()
+  seen_app_user_actions = set()
+
+  # Create models
+  policyModels = []
   for ca_policy in get_policy_defs(args):
     grant_controls = ca_policy['grantControls']
-    built_in = grant_controls['builtInControls']
-    if len(set(built_in) - set(['mfa', 'block'])) > 0:
-      print('Skipping CA with control: %s' % str(built_in))
+    if not grant_controls:
       continue
-    import IPython; IPython.embed()
-    controls = []
-    for cid in built_in:
-      a = control_vars[cid] # Python 3.8.10 bug? Can't get item from control_vars dict but works in IPython?
-      controls.append(a)
-
-    combinator = cp.any if grant_controls['operator'] == 'OR' else cp.all
-    control_vars = combinator(controls)
+    built_in = grant_controls['builtInControls']
     policy_id = ca_policy['id']
 
-    if not policy_groups[policy_id]:
+    if not policy_user_groups[policy_id]:
       # Policy targets nobody. Does even less than audit mode.
       continue
-    user_requirement = cp.any([group_bool_vars[gid] for gid in policy_groups[policy_id]])
+    
+    # Grant controls
+    grant_controls = ca_policy['grantControls']
+    grant_operator = None  # only session controls if this is none
+    grant_builtin_controls = None
+    if grant_controls:
+      if grant_controls['builtInControls'] == "block":
+        grant_operator = "block"
+      elif grant_controls['operator'] in ["OR", "AND"]:
+        grant_operator = grant_controls['operator']
+        grant_builtin_controls = grant_controls['builtInControls']
+        seen_builtin_controls.update(grant_builtin_controls)
+      else:
+        raise Exception('Grant control operator: %s' % str(grant_controls))
 
-    model.append(user_requirement.implies(controls))
-    import IPython; IPython.embed()
+    user_actions = set()
+    if ua := ca_policy['conditions']['applications'].get('includeUserActions'):
+      user_actions = set(ua)
+      seen_app_user_actions |= user_actions
 
-  return cp.Model(*model)
+    policyModels.append(PolicyModel(
+      id=policy_id,
+      name=ca_policy['displayName'],
+      enabled=ca_policy['state'] == 'enabled',
+      members=policy_user_memberships[policy_id],
+      condition_usergroups=policy_user_groups[policy_id],
+      condition_applications=policy_app_groups[policy_id],
+      condition_application_user_action=user_actions,
+      grant_operator=grant_operator,
+      grant_builtin_controls=grant_builtin_controls
+    ))
+  
+  generalInfo = GeneralInfo(
+    disjoint_artificial_user_groups=dja_user_groups,
+    disjoint_artificial_app_groups=dja_app_groups,
+    seen_builtin_controls=seen_builtin_controls,
+    seen_app_user_actions=seen_app_user_actions
+  )
+
+  return policyModels, generalInfo
+
+def translate_policymodel_to_cpmpy(policyModels:[PolicyModel]):
+  addition = user_requirement.implies(control_requirement)
+  model.append(addition)
+
+  group_bool_vars = {gid: cp.boolvar(name='AG%s' % gid) for gid in disjoint_artificial_groups.keys()}
+  control_vars = {n: cp.boolvar(name=n) for n in ['mfa', 'block']}
+
+  #combinator = cp.any if grant_controls['operator'] == 'OR' else cp.all
+  #control_requirement = combinator(controls)
+  #user_requirement = cp.any([group_bool_vars[gid] for gid in policy_groups[policy_id]])
+
+  pass
+
+mk_html5_doc = lambda title, table: f"""
+<html>
+  <head>
+    <style type="text/css">
+
+.mystyle {
+  font-size: 11pt; 
+  font-family: Arial;
+  border-collapse: collapse; 
+  border: 1px solid silver;
+
+}
+
+.mystyle td, th {
+  padding: 5px;
+}
+
+.mystyle tr:nth-child(even) {
+  background: #E0E0E0;
+}
+
+.mystyle tr:hover {
+  background: silver;
+  cursor: pointer;
+}
+    </style>
+  </head>
+  <body>
+  <h1>{title}</h1>
+
+  {table}
+  </body>
+"""
+
+def create_report(policy_models, generalInfo):
+  pms = sorted(policy_models, key=lambda x: (not x.enabled, x.name))
+
+  d = {
+     'Name': [p.name for p in pms],
+     'Enabled': [str(p.enabled) for p in pms]
+  }
+  def x(b):
+    return 'X' if b else ''
+
+  for ug, members in generalInfo.disjoint_artificial_user_groups.items():
+    u_count = len(members)
+    d['UG%s/ %d' % (ug, u_count)] = [x(ug in p.condition_usergroups) for p in pms]
+
+  for ag, apps in generalInfo.disjoint_artificial_app_groups.items():
+    if len(apps) == 1:
+      ag_id = 'AG%s %s' % (ag, list(apps)[0])
+    else:
+      ag_id = 'AG%s (%d apps)' % (ag, len(apps))
+    d[ag_id] = [x(ag in p.condition_applications) for p in pms]
+
+  for action in sorted(list(generalInfo.seen_app_user_actions)):
+    d['Action: %s' % action] = [x(action in p.condition_application_user_action) for p in pms]
+
+  d['C:operator'] = [p.grant_operator for p in pms]
+
+  for builtin in sorted(list(generalInfo.seen_builtin_controls)):
+    d['C:%s' % builtin] = [x(builtin in p.grant_builtin_controls) for p in pms]
+
+  df = pd.DataFrame(data=d)
+
+  with open('report.html', 'w') as out_f:
+    out_f.write(mk_html5_doc("Policy summary", df.to_html(classes='mystyle')))
+
+  # import IPython; IPython.embed()
 
 def main():
   args = parser.parse_args()
@@ -180,8 +373,10 @@ def main():
   fetch_ca_policy(args)
   resolve_memberships_with_query(args)
   fetch_all_users(args)
-  policy_memberships = resolve_members_for_policy_objects(args)
-  model = create_model(args, policy_memberships)
+
+  # create pre-model separately and translate it later to cpmpy
+  policy_models, generalInfo = create_policymodels(args)
+  create_report(policy_models, generalInfo)
 
 
 if __name__ == '__main__':
