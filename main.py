@@ -257,8 +257,6 @@ def create_policymodels(args):
     if not enabled and not args.include_report_only:
       continue
     policy_id = ca_policy['id']
-    if policy_id == "fa064ef3-f6d8-467f-8df2-3d121cac3564":
-      continue
     grant_controls = ca_policy['grantControls']
     if not grant_controls:
       continue
