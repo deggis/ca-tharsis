@@ -480,11 +480,12 @@ def translate_policymodels_to_task(args, policyModels:List[PolicyModel], general
     #############################################################################
     # Conditions (the above are also similarly conditions but ok)
     #############################################################################
-    conditions = True
+
+    conditions = True  # satisfied if nothing configured
 
     # Client apps
     if len(pm.condition_client_app_types) != 4:
-      # Skip client app requirement if 4 values: all options selected. Includes all cases.
+      # Assumption: Selecting all 4 possible app types is equal to not selecting any
       conditions &= cp.any([getvar(VarType.CONDITION_CLIENT_APP_TYPE, capp) for capp in pm.condition_client_app_types])
     if pm.condition_signin_risk_levels:
       conditions &= cp.any([getvar(VarType.CONDITION_SIGNIN_RISK_LEVEL, level) for level in pm.condition_signin_risk_levels])
