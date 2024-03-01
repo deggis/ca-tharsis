@@ -193,9 +193,13 @@ def resolve_members_for_policy_objects(args, all_users):
       # FIXME: check includeGuestsOrExternalUsers
     
     for excludedRoleId in user_targeting['excludeRoles']:
-      included |= get_members(mk_role_result_path(args, excludedRoleId))
+      for excludedMember in get_members(mk_role_result_path(args, excludedRoleId)):
+        if excludedMember in included:
+          included.remove(excludedMember)
     for excludedGroupId in user_targeting['excludeGroups']:
-      included |= get_members(mk_group_result_path(args, excludedGroupId))
+      for excludedMember in get_members(mk_group_result_path(args, excludedGroupId)):
+        if excludedMember in included:
+            included.remove(excludedMember)
     for excludedUserId in user_targeting['excludeUsers']:
       # User can be already excluded through previous methods
       if excludedUserId in included:
