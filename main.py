@@ -447,7 +447,6 @@ def solutions_to_table(args, solutions, displayed_vars):
   df = pd.DataFrame(data=d)
   with open(mk_summary_report_path(args), 'w') as out_f:
     out_f.write(mk_html5_doc("Solutions summary", df.to_html(classes='mystyle')))
-  import IPython; IPython.embed()
 
 def translate_policymodels_to_task(args, policyModels:List[PolicyModel], generalInfo:GeneralInfo):
   requirements = []
