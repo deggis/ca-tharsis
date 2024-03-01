@@ -4,14 +4,19 @@ import json
 from os.path import join as path_join
 import subprocess
 import os
-from functools import cache
+from functools import cache, reduce
+from typing import List
+from enum import Enum, auto
 
 import cpmpy as cp
+from cpmpy.solvers.ortools import OrtSolutionPrinter
 import pandas as pd
 
 from disjoint_sets import split_to_disjoint_sets, GroupMembers
 from collections import namedtuple
 from common_apps import common_apps
+
+
 
 # "Look How They Massacred My Boy"
 PolicyModel = namedtuple('PolicyModel', [
@@ -24,9 +29,13 @@ PolicyModel = namedtuple('PolicyModel', [
   'condition_usergroups',
   'condition_applications',
   'condition_application_user_action',
+  'condition_client_app_types',
+  'condition_signin_risk_levels',
+  'condition_user_risk_levels',
   # Controls
   'grant_operator', # And, Or, Block, None
-  'grant_builtin_controls'
+  'grant_builtin_controls',
+  'grant_authentication_strength'
 ])
 
 GeneralInfo = namedtuple('GeneralInfo', [
@@ -51,9 +60,16 @@ mk_ca_path = lambda args: os.path.join(args.work_dir, 'ca.json')
 mk_group_result_path = lambda args, group_id: os.path.join(args.work_dir, f'group_{group_id}.json')
 mk_role_result_path = lambda args, role_id: os.path.join(args.work_dir, f'role_{role_id}.json')
 mk_all_users_path = lambda args: os.path.join(args.work_dir, 'all_users.json')
+mk_summary_report_path = lambda args: os.path.join(args.work_dir, 'summary_of_ca.html')
+mk_summary_report_path = lambda args: os.path.join(args.work_dir, 'summary_solutions.html')
 
 META_APP_ALL_UNMETIONED_APPS = "RestOfTheApps"
 MICROSOFT_ADMIN_PORTALS_APP = "MicrosoftAdminPortals"
+
+ALL_CLIENT_APP_TYPES = ['browser', 'mobileAppsAndDesktopClients', 'exchangeActiveSync', 'other']
+ALL_USER_RISK_LEVELS = ['high', 'medium', 'low', 'none']
+ALL_SIGNIN_RISK_LEVELS = ['high', 'medium', 'low', 'none']
+
 
 """
 def old():
@@ -233,11 +249,15 @@ def create_policymodels(args):
   # Create models
   policyModels = []
   for ca_policy in get_policy_defs(args):
+    enabled = ca_policy['state'] == 'enabled'
+    if not enabled and not args.include_report_only:
+      continue
+    policy_id = ca_policy['id']
+    if policy_id == "fa064ef3-f6d8-467f-8df2-3d121cac3564":
+      continue
     grant_controls = ca_policy['grantControls']
     if not grant_controls:
       continue
-    built_in = grant_controls['builtInControls']
-    policy_id = ca_policy['id']
 
     if not policy_user_groups[policy_id]:
       # Policy targets nobody. Does even less than audit mode.
@@ -248,30 +268,46 @@ def create_policymodels(args):
     grant_operator = None  # only session controls if this is none
     grant_builtin_controls = None
     if grant_controls:
-      if grant_controls['builtInControls'] == "block":
-        grant_operator = "block"
-      elif grant_controls['operator'] in ["OR", "AND"]:
-        grant_operator = grant_controls['operator']
-        grant_builtin_controls = grant_controls['builtInControls']
-        seen_builtin_controls.update(grant_builtin_controls)
-      else:
-        raise Exception('Grant control operator: %s' % str(grant_controls))
+      #elif grant_controls['operator'] in ["OR", "AND"]:
+      grant_operator = grant_controls['operator']
+      grant_builtin_controls = grant_controls['builtInControls']
+      seen_builtin_controls.update(grant_builtin_controls)
+
+    authenticationStrength = None
+    if strength := grant_controls.get('authenticationStrength'):
+      authenticationStrength = strength
+
+    conditions = ca_policy['conditions']
 
     user_actions = set()
-    if ua := ca_policy['conditions']['applications'].get('includeUserActions'):
+    if ua := conditions['applications'].get('includeUserActions'):
       user_actions = set(ua)
       seen_app_user_actions |= user_actions
+
+    client_app_types = set()
+    all_app_types = ALL_CLIENT_APP_TYPES
+    if conditions['clientAppTypes'] == ['all']:
+      client_app_types = set(all_app_types)
+    else:
+      client_app_types = set(conditions['clientAppTypes'])
+
+    signin_risk_levels = set(conditions['signInRiskLevels'])
+    user_risk_levels = set(conditions['userRiskLevels'])
 
     policyModels.append(PolicyModel(
       id=policy_id,
       name=ca_policy['displayName'],
-      enabled=ca_policy['state'] == 'enabled',
+      enabled=enabled,
       members=policy_user_memberships[policy_id],
       condition_usergroups=policy_user_groups[policy_id],
       condition_applications=policy_app_groups[policy_id],
       condition_application_user_action=user_actions,
+      condition_client_app_types=client_app_types,
+      condition_signin_risk_levels=signin_risk_levels,
+      condition_user_risk_levels=user_risk_levels,
       grant_operator=grant_operator,
-      grant_builtin_controls=grant_builtin_controls
+      grant_builtin_controls=grant_builtin_controls,
+      grant_authentication_strength=authenticationStrength
     ))
   
   generalInfo = GeneralInfo(
@@ -283,55 +319,38 @@ def create_policymodels(args):
 
   return policyModels, generalInfo
 
-def translate_policymodel_to_cpmpy(policyModels:[PolicyModel]):
-  addition = user_requirement.implies(control_requirement)
-  model.append(addition)
 
-  group_bool_vars = {gid: cp.boolvar(name='AG%s' % gid) for gid in disjoint_artificial_groups.keys()}
-  control_vars = {n: cp.boolvar(name=n) for n in ['mfa', 'block']}
-
-  #combinator = cp.any if grant_controls['operator'] == 'OR' else cp.all
-  #control_requirement = combinator(controls)
-  #user_requirement = cp.any([group_bool_vars[gid] for gid in policy_groups[policy_id]])
-
-  pass
-
-mk_html5_doc = lambda title, table: f"""
+mk_html5_doc = lambda title, table: """
 <html>
   <head>
     <style type="text/css">
-
-.mystyle {
-  font-size: 11pt; 
-  font-family: Arial;
-  border-collapse: collapse; 
-  border: 1px solid silver;
-
-}
-
-.mystyle td, th {
-  padding: 5px;
-}
-
-.mystyle tr:nth-child(even) {
-  background: #E0E0E0;
-}
-
-.mystyle tr:hover {
-  background: silver;
-  cursor: pointer;
-}
+      .mystyle {
+        font-size: 11pt; 
+        font-family: Arial;
+        border-collapse: collapse; 
+        border: 1px solid silver;
+      }
+      .mystyle td, th {
+        padding: 5px;
+      }
+      .mystyle tr:nth-child(even) {
+        background: #E0E0E0;
+      }
+      .mystyle tr:hover {
+        background: silver;
+        cursor: pointer;
+      }
     </style>
   </head>
   <body>
-  <h1>{title}</h1>
+  <h1>%s</h1>
 
-  {table}
+  %s
   </body>
-"""
+""" % (title, table)
 
-def create_report(policy_models, generalInfo):
-  pms = sorted(policy_models, key=lambda x: (not x.enabled, x.name))
+def create_report(args, policyModels:List[PolicyModel], generalInfo:GeneralInfo):
+  pms = sorted(policyModels, key=lambda x: (not x.enabled, x.name))
 
   d = {
      'Name': [p.name for p in pms],
@@ -361,10 +380,153 @@ def create_report(policy_models, generalInfo):
 
   df = pd.DataFrame(data=d)
 
-  with open('report.html', 'w') as out_f:
+  with open(mk_summary_report_path(args), 'w') as out_f:
     out_f.write(mk_html5_doc("Policy summary", df.to_html(classes='mystyle')))
 
-  # import IPython; IPython.embed()
+class VarType(Enum):
+    CONDITION_USER_GROUP = auto()
+    CONDITION_APPLICATION_GROUP = auto()
+    CONDITION_APP_USER_ACTION = auto()
+    CONDITION_CLIENT_APP_TYPE = auto()
+    CONDITION_USER_RISK_LEVEL = auto()
+    CONDITION_SIGNIN_RISK_LEVEL = auto()
+    BUILTIN_CONTROL = auto()
+
+@cache
+def _get_boolvar(name):
+  return cp.boolvar(name=name)
+
+def get_boolvar(vtype:VarType, id_:str, policyModels:List[PolicyModel], generalInfo:GeneralInfo):
+  """
+  Cache the answers to be able to return same instances.
+  """
+
+  match vtype:
+    case VarType.CONDITION_USER_GROUP:
+      return _get_boolvar('UG%s' % id_)
+    case VarType.CONDITION_APPLICATION_GROUP:
+      return _get_boolvar('AG%s' % id_)
+    case VarType.CONDITION_APP_USER_ACTION:
+      return _get_boolvar('UserAction:%s' % id_)
+    case VarType.CONDITION_CLIENT_APP_TYPE:
+      return _get_boolvar('ClientAppType:%s' % id_)
+    case VarType.BUILTIN_CONTROL:
+      return _get_boolvar('Control:%s' % id_)
+    case VarType.CONDITION_SIGNIN_RISK_LEVEL:
+      return _get_boolvar('SigninRisk:%s' % id_)
+    case VarType.CONDITION_USER_RISK_LEVEL:
+      return _get_boolvar('UserRisk:%s' % id_)
+
+def get_all_vars_for_display(all_vars):
+  var_types = [
+    VarType.CONDITION_USER_GROUP,
+    VarType.CONDITION_APPLICATION_GROUP,
+    VarType.CONDITION_APP_USER_ACTION,
+    VarType.CONDITION_CLIENT_APP_TYPE,
+    VarType.CONDITION_USER_RISK_LEVEL,
+    VarType.CONDITION_SIGNIN_RISK_LEVEL,
+    VarType.BUILTIN_CONTROL
+  ]
+
+  vars = []
+  for vtype in var_types:
+    for key in sorted(all_vars.get(vtype, {}).keys()):
+      vars.append(all_vars[vtype][key])
+  return vars
+
+def solutions_to_table(args, solutions, displayed_vars):
+  d = {}
+  def x(b):
+    return 'X' if b else ''
+
+  for i in range(0, len(displayed_vars)):
+    d[displayed_vars[i].name] = [x(s[i]) for s in solutions]
+
+  df = pd.DataFrame(data=d)
+  with open(mk_summary_report_path(args), 'w') as out_f:
+    out_f.write(mk_html5_doc("Solutions summary", df.to_html(classes='mystyle')))
+  import IPython; IPython.embed()
+
+def translate_policymodels_to_task(args, policyModels:List[PolicyModel], generalInfo:GeneralInfo):
+  requirements = []
+  all_vars = {}
+  def getvar(vtype, id_:str):
+    bv = get_boolvar(vtype, id_, policyModels, generalInfo)
+    type_catalog = all_vars.setdefault(vtype, {})
+    if id_ not in type_catalog:
+      type_catalog[id_] = bv
+    return bv
+
+  mfa = getvar(VarType.BUILTIN_CONTROL, 'mfa')
+  block = getvar(VarType.BUILTIN_CONTROL, 'block')
+  authStrength = getvar(VarType.BUILTIN_CONTROL, 'authStrength')
+
+  # pre-create some content
+  for client_app in ALL_CLIENT_APP_TYPES:
+    _ = getvar(VarType.CONDITION_CLIENT_APP_TYPE, client_app)
+  for level in ALL_USER_RISK_LEVELS:
+    _ = getvar(VarType.CONDITION_USER_RISK_LEVEL, level)
+  for level in ALL_SIGNIN_RISK_LEVELS:
+    _ = getvar(VarType.CONDITION_SIGNIN_RISK_LEVEL, level)
+
+  for pm in policyModels:
+    # Users: User selections
+    user_selection = cp.any([getvar(VarType.CONDITION_USER_GROUP, str(gid)) for gid in pm.condition_usergroups])
+
+    # Target Resources: App selections
+    app_selection = cp.any([getvar(VarType.CONDITION_APPLICATION_GROUP, str(aid)) for aid in pm.condition_applications])
+
+    #############################################################################
+    # Conditions (the above are also similarly conditions but ok)
+    #############################################################################
+    conditions = True
+
+    # Client apps
+    if len(pm.condition_client_app_types) != 4:
+      # Skip client app requirement if 4 values: all options selected. Includes all cases.
+      conditions &= cp.any([getvar(VarType.CONDITION_CLIENT_APP_TYPE, capp) for capp in pm.condition_client_app_types])
+    if pm.condition_signin_risk_levels:
+      conditions &= cp.any([getvar(VarType.CONDITION_SIGNIN_RISK_LEVEL, level) for level in pm.condition_signin_risk_levels])
+    if pm.condition_user_risk_levels:
+      conditions &= cp.any([getvar(VarType.CONDITION_USER_RISK_LEVEL, level) for level in pm.condition_user_risk_levels])
+
+    # Grant controls
+    grant_combinator = cp.any if pm.grant_operator == 'OR' else cp.all
+    grant_controls = [getvar(VarType.BUILTIN_CONTROL, c) for c in pm.grant_builtin_controls]
+    if pm.grant_authentication_strength:
+      grant_controls.append(authStrength)
+    control_requirement = grant_combinator(grant_controls)
+
+    # Only one usergroup 
+    print(pm.name)
+    policy = (user_selection & app_selection & conditions).implies(control_requirement)
+    print(str(policy))
+
+    # All ready for this policy
+    requirements.append(policy)
+
+  # Selection requirements: in a solution one user should be accessing one app. These are represented by groups.
+  xor = lambda a,b: a^b
+  requirements.append(reduce(xor, all_vars[VarType.CONDITION_USER_GROUP].values()))         # Require 1 user group
+  requirements.append(reduce(xor, all_vars[VarType.CONDITION_APPLICATION_GROUP].values()))  # Require 1 app group
+  requirements.append(reduce(xor, all_vars[VarType.CONDITION_CLIENT_APP_TYPE].values()))  # Require 1 app group
+  requirements.append(reduce(xor, all_vars[VarType.CONDITION_SIGNIN_RISK_LEVEL].values()))  # Require 1
+  requirements.append(reduce(xor, all_vars[VarType.CONDITION_USER_RISK_LEVEL].values()))    # Require 1
+
+  # General requirements
+  requirements.append(~block)         # Block definitely needs to be avoided
+  requirements.append(~authStrength)  # Let's avoid auth strength requirement for now
+  requirements.append(~mfa)           # Avoid MFA?
+
+  model = cp.Model(*requirements)
+
+  displayed_vars = get_all_vars_for_display(all_vars)
+  solver = cp.SolverLookup.get('ortools', model)
+  solutions = []
+  def collect():
+      solutions.append([x.value() for x in displayed_vars])
+  solver.solveAll(display=collect, solution_limit=50)
+  solutions_to_table(args, solutions, displayed_vars)
 
 def main():
   args = parser.parse_args()
@@ -376,8 +538,10 @@ def main():
 
   # create pre-model separately and translate it later to cpmpy
   policy_models, generalInfo = create_policymodels(args)
-  create_report(policy_models, generalInfo)
+  create_report(args, policy_models, generalInfo)
 
+  # create model
+  translate_policymodels_to_task(args, policy_models, generalInfo)
 
 if __name__ == '__main__':
   main()
