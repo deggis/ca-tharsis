@@ -7,13 +7,13 @@
 
 # Conditional Access policies
 
-In a Microsoft ecosystem, Conditional Access policies have an important role in defining required security controls. As an oversimplication, they control whether or not MFA is applied.
+In a Microsoft ecosystem, Microsoft Entra ID Conditional Access policies have an important role in defining required security controls. As an oversimplication, they control whether or not MFA is applied.
 
 All Conditional Access policies are evaluated for every sign-in, but if the login does not meet targeting of the policies, no additional controls are applied on top of username+password.
 
 # ca-tharsis summary
 
-ca-tharsis finds weaknesses in Microsoft Entra ID Conditional Access policies using constraint solving.
+ca-tharsis finds weaknesses in Conditional Access policies using constraint solving.
 
 While these policies are simple to create, they are notoriously difficult to maintain and review. The portal provides what-if tool for spot checking single sign-in scenarios, but does not provide the needed overall visibility to what is applied, and what the weaknesses are.
 
