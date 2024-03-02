@@ -5,13 +5,17 @@
 
 *ca-tharsis project logo, ink on premium toilet paper, 2024*
 
-# Summary
+# Conditional Access policies
 
-Find weaknesses in Microsoft Entra ID Conditional Access policies using constraint solving.
+In a Microsoft ecosystem, Conditional Access policies have an important role in defining required security controls. As an oversimplication, they control whether or not MFA is applied.
 
-In a Microsoft ecosystem Conditional Access policies have an important role in identity secury. As an oversimplication, they control whether or not MFA is applied.
+All Conditional Access policies are evaluated for every sign-in, but if the login does not meet targeting of the policies, no additional controls are applied on top of username+password.
 
-While these policies are simple, they are notoriously difficult to maintain and review.
+# ca-tharsis summary
+
+ca-tharsis finds weaknesses in Microsoft Entra ID Conditional Access policies using constraint solving.
+
+While these policies are simple to create, they are notoriously difficult to maintain and review. The portal provides what-if tool for spot checking single sign-in scenarios, but does not provide the needed overall visibility to what is applied, and what the weaknesses are.
 
 ca-tharsis aims specifically to answer one question: how lucky the adversary needs to be in choosing suitable user and other authentication conditions to be able to bypass controls such as MFA?
 
