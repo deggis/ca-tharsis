@@ -13,11 +13,13 @@ All Conditional Access policies are evaluated for every sign-in, but if the logi
 
 # ca-tharsis summary
 
-ca-tharsis finds weaknesses in Conditional Access policies using constraint solving.
+ca-tharsis finds weaknesses in Conditional Access policies using constraint solvers.
 
 While these policies are simple to create, they are notoriously difficult to maintain and review. The portal provides what-if tool for spot checking single sign-in scenarios, but does not provide the needed overall visibility to what is applied, and what the weaknesses are.
 
-ca-tharsis aims specifically to answer one question: how lucky the adversary needs to be in choosing suitable user and other authentication conditions to be able to bypass controls such as MFA?
+ca-tharsis aims specifically to answer one question: how lucky the adversary needs to be in order to bypass MFA and other controls? In other words, what sign-in scenario offers the least resistance to an adversary.
+
+This answer is searched by re-expressing the conditional access policy set as logical implications, and later requiring the solver to minimize the cost-to-attack.
 
 # Method
 
@@ -34,6 +36,9 @@ ca-tharsis aims specifically to answer one question: how lucky the adversary nee
 	- The cost function is *cost-to-attack* which we humbly ask the solver to minimize for us
 - Solutions
 	- There are always solutions
+- cost-to-attack:
+  - There are default weights in place. Main idea: guessing a single exempted user or application is harder than a situation where half is exempted.
+  - TODO: Make weights configurable.
 - Assumption: there aren't tons of exclusion groups that are unique to each policy definition
 
 # Method (again but with images)
