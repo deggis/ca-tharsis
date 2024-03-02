@@ -1,6 +1,12 @@
 
 # ca-tharsis
 
+![ca-tharsis logo](https://github.com/deggis/ca-tharsis/blob/master/img/ca-tharsis.jpg)
+
+*ca-tharsis project logo, ink on premium toilet paper, 2024*
+
+# Summary
+
 Find weaknesses in Microsoft Entra ID Conditional Access policies using constraint solving.
 
 In a Microsoft ecosystem Conditional Access policies have an important role in identity secury. As an oversimplication, they control whether or not MFA is applied.
