@@ -70,27 +70,6 @@ ALL_CLIENT_APP_TYPES = ['browser', 'mobileAppsAndDesktopClients', 'exchangeActiv
 ALL_USER_RISK_LEVELS = ['high', 'medium', 'low', 'none']
 ALL_SIGNIN_RISK_LEVELS = ['high', 'medium', 'low', 'none']
 
-
-"""
-def old():
-  mfaRequired = cp.boolvar(name='MFARequired')
-  controlApplied = cp.boolvar(name='ControlApplied')
-
-  userA = cp.boolvar(name='UserA')
-  userB = cp.boolvar(name='UserB')
-  macOS = cp.boolvar(name='macOS')
-  teams = cp.boolvar(name='Teams')
-  compliantDevice = cp.boolvar(name='CompliantDevice')
-
-  m = cp.Model(
-    (macOS & ~teams).implies(mfaRequired | compliantDevice),
-
-    mfaRequired.implies(controlApplied),
-    compliantDevice.implies(controlApplied),
-    ~controlApplied
-  )
-"""
-
 def read_policy_file(args, path):
   with open(path) as in_f:
     policy = json.load(in_f)
@@ -547,6 +526,3 @@ def main():
 
 if __name__ == '__main__':
   main()
-
-
-# n = m.solveAll(display=[macOS,teams,compliantDevice,controlApplied,mfaRequired], solution_limit=7)
