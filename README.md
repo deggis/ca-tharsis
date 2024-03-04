@@ -35,7 +35,7 @@ This answer is searched by re-expressing the Conditional Access policy set as lo
 
 Note: Conditional Access policy editor uses terms like "assignment", "conditions", "target resources". These refer to the same thing: if a sign-in event matches what's configured in the policy, it will be applied. If not, the policy is not effective and does not contribute any additional controls to that sign-in event.
 
-It's an if-then engine. ca-tharsis needs to massage the definition a bit before we can express the conditions as if-then rules (logical implications) with cpmpy.
+CA policy set is a list of if-then rules. ca-tharsis needs to massage the definitions a bit before we can express the conditions as `cpmpy` if-then rules (logical implications).
 
 ## Step 1: Minimize the need for variables
 
