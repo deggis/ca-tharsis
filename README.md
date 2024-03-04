@@ -46,12 +46,12 @@ Now, within these artificial user groups, **AUG's**, and application groups **AA
 
 ## Step 2: Internal representation of policy objects
 
-We dig the information for the rest of the referenced policy filters and re-create them.
+We dig the information for the rest of the referenced policy filters and re-create an internal representation for them.
 
 As an accidental byproduct of this (especially the Step 1), we're able to create relatively compact reporting of existing policies using artificial user/application groups:
 
-- How many users are targeted
-- What applications are targeted
+- How many and which users are targeted
+- How many and which applications are targeted
 - What controls are included
 
 ## Step 3: Re-create the policy as logical model
