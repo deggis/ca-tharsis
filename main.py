@@ -17,8 +17,6 @@ from collections import namedtuple
 from common_apps import common_apps
 
 
-
-# "Look How They Massacred My Boy"
 PolicyModel = namedtuple('PolicyModel', [
   'id',
   # General information to help reporting
@@ -42,7 +40,9 @@ GeneralInfo = namedtuple('GeneralInfo', [
   'disjoint_artificial_user_groups',
   'disjoint_artificial_app_groups',
   'seen_builtin_controls',
-  'seen_app_user_actions'
+  'seen_app_user_actions',
+  'users_count',
+  'apps_count'
 ])
 
 # Conditional Access Constraint Solver for Gaps
@@ -55,13 +55,14 @@ parser = argparse.ArgumentParser(
 parser.add_argument('work_dir', type=str)
 parser.add_argument('--include-report-only', action='store_true')
 parser.add_argument('--create-queries', action='store_true')
+parser.add_argument('--number-of-solutions', type=int, default=5)
 
 mk_ca_path = lambda args: os.path.join(args.work_dir, 'ca.json')
 mk_group_result_path = lambda args, group_id: os.path.join(args.work_dir, f'group_{group_id}.json')
 mk_role_result_path = lambda args, role_id: os.path.join(args.work_dir, f'role_{role_id}.json')
 mk_all_users_path = lambda args: os.path.join(args.work_dir, 'all_users.json')
 mk_summary_report_path = lambda args: os.path.join(args.work_dir, 'summary_of_ca.html')
-mk_summary_report_path = lambda args: os.path.join(args.work_dir, 'summary_solutions.html')
+mk_solutions_report_path = lambda args: os.path.join(args.work_dir, 'summary_solutions.html')
 
 META_APP_ALL_UNMETIONED_APPS = "RestOfTheApps"
 MICROSOFT_ADMIN_PORTALS_APP = "MicrosoftAdminPortals"
@@ -70,17 +71,14 @@ ALL_CLIENT_APP_TYPES = ['browser', 'mobileAppsAndDesktopClients', 'exchangeActiv
 ALL_USER_RISK_LEVELS = ['high', 'medium', 'low', 'none']
 ALL_SIGNIN_RISK_LEVELS = ['high', 'medium', 'low', 'none']
 
-def read_policy_file(args, path):
-  with open(path) as in_f:
-    policy = json.load(in_f)
-    if policy['state'] == 'enabledForReportingButNotEnforced' and not args.include_report_only:
-      print(f'{path} is set to report only, skipping. Use --include-report-only to include.')
-    return policy
-
 def get_policy_defs(args):
   with open(mk_ca_path(args)) as in_f:
     ca = json.load(in_f)
-    return ca['value']
+    policy_objects = ca['value']
+    if args.include_report_only:
+      return policy_objects
+    else:
+      return [p for p in policy_objects if p['state'] == 'enabled']
 
 def run_cmd(cmd_string):
   subprocess.run(cmd_string, shell=True, capture_output=True)
@@ -161,7 +159,7 @@ def resolve_members_for_policy_objects(args, all_users):
     user_targeting = ca_policy['conditions']['users']
     included = set()
     if user_targeting['includeUsers'] == ['All']:
-      included = all_users
+      included = all_users.copy()
     else:
       for includedRoleId in user_targeting['includeRoles']:
         included |= get_members(mk_role_result_path(args, includedRoleId))
@@ -178,7 +176,7 @@ def resolve_members_for_policy_objects(args, all_users):
     for excludedGroupId in user_targeting['excludeGroups']:
       for excludedMember in get_members(mk_group_result_path(args, excludedGroupId)):
         if excludedMember in included:
-            included.remove(excludedMember)
+          included.remove(excludedMember)
     for excludedUserId in user_targeting['excludeUsers']:
       # User can be already excluded through previous methods
       if excludedUserId in included:
@@ -211,7 +209,7 @@ def create_policymodels(args):
   # Users
   all_users = get_members(mk_all_users_path(args))
   policy_user_memberships = resolve_members_for_policy_objects(args, all_users)
-  policy_user_memberships['all_meta'] = set(all_users)
+  policy_user_memberships['all_meta'] = all_users.copy()
 
   users_task = [GroupMembers(name=policy_id, members=members)
       for policy_id, members in policy_user_memberships.items()]
@@ -233,8 +231,6 @@ def create_policymodels(args):
   policyModels = []
   for ca_policy in get_policy_defs(args):
     enabled = ca_policy['state'] == 'enabled'
-    if not enabled and not args.include_report_only:
-      continue
     policy_id = ca_policy['id']
     grant_controls = ca_policy['grantControls']
     if not grant_controls:
@@ -295,7 +291,9 @@ def create_policymodels(args):
     disjoint_artificial_user_groups=dja_user_groups,
     disjoint_artificial_app_groups=dja_app_groups,
     seen_builtin_controls=seen_builtin_controls,
-    seen_app_user_actions=seen_app_user_actions
+    seen_app_user_actions=seen_app_user_actions,
+    users_count=len(all_users),
+    apps_count=len(all_apps)
   )
 
   return policyModels, generalInfo
@@ -424,8 +422,36 @@ def solutions_to_table(args, solutions, displayed_vars):
     d[displayed_vars[i].name] = [x(s[i]) for s in solutions]
 
   df = pd.DataFrame(data=d)
-  with open(mk_summary_report_path(args), 'w') as out_f:
+  with open(mk_solutions_report_path(args), 'w') as out_f:
     out_f.write(mk_html5_doc("Solutions summary", df.to_html(classes='mystyle')))
+
+def get_uag_cost(args, uag_id, generalInfo:GeneralInfo):
+  return len(generalInfo.disjoint_artificial_user_groups[uag_id])  # FIXME
+
+def get_aag_cost(args, aag_id, generalInfo:GeneralInfo):
+  return len(generalInfo.disjoint_artificial_app_groups[aag_id])  # FIXME
+
+def get_builtin_control_cost(args, builtin_control_name, generalInfo:GeneralInfo):
+  # FIXME
+  costs = {
+    'block': 1000,  # not needed if ~block required
+    'mfa': 500,
+    'compliantDevice': 250,
+    'domainJoinedDevice': 150,
+    'passwordChange': 200
+  }
+  return costs.get(builtin_control_name, 50)
+
+def get_signin_risk_cost(args, level):
+  return {
+    'none': 30,
+    'low': 10,
+    'medium': 5,
+    'high': 0
+  }[level]
+
+def get_user_risk_cost(args, level):
+  return get_signin_risk_cost(args, level)
 
 def translate_policymodels_to_task(args, policyModels:List[PolicyModel], generalInfo:GeneralInfo):
   requirements = []
@@ -439,15 +465,31 @@ def translate_policymodels_to_task(args, policyModels:List[PolicyModel], general
 
   mfa = getvar(VarType.BUILTIN_CONTROL, 'mfa')
   block = getvar(VarType.BUILTIN_CONTROL, 'block')
-  authStrength = getvar(VarType.BUILTIN_CONTROL, 'authStrength')
+  # authStrength = getvar(VarType.BUILTIN_CONTROL, 'authStrength')
 
   # pre-create some content
   for client_app in ALL_CLIENT_APP_TYPES:
     _ = getvar(VarType.CONDITION_CLIENT_APP_TYPE, client_app)
-  for level in ALL_USER_RISK_LEVELS:
-    _ = getvar(VarType.CONDITION_USER_RISK_LEVEL, level)
-  for level in ALL_SIGNIN_RISK_LEVELS:
-    _ = getvar(VarType.CONDITION_SIGNIN_RISK_LEVEL, level)
+  
+  # Minimize variables a bit: Add SignInRisk=none only if sign-in risk used anywhere
+  # Same with user-risk.
+  if any([bool(pm.condition_signin_risk_levels) for pm in policyModels]):
+    _ = getvar(VarType.CONDITION_SIGNIN_RISK_LEVEL, 'none')
+  if any([bool(pm.condition_user_risk_levels) for pm in policyModels]):
+    _ = getvar(VarType.CONDITION_USER_RISK_LEVEL, 'none')
+
+  _seen_builtin_controls = sorted(generalInfo.seen_builtin_controls)
+  cost_vector = cp.intvar(0,1000, shape=5+len(_seen_builtin_controls))
+  cost_user = cost_vector[0]
+  cost_app = cost_vector[1]
+  cost_auth_strength = cost_vector[2]
+  cost_signin_risk = cost_vector[3]
+  cost_user_risk = cost_vector[4]
+
+  next_cost_i = 5
+  control_costs = {}
+  for i, n in enumerate(_seen_builtin_controls):
+    control_costs[n] = cost_vector[next_cost_i+i]
 
   for pm in policyModels:
     # Users: User selections
@@ -456,9 +498,7 @@ def translate_policymodels_to_task(args, policyModels:List[PolicyModel], general
     # Target Resources: App selections
     app_selection = cp.any([getvar(VarType.CONDITION_APPLICATION_GROUP, str(aid)) for aid in pm.condition_applications])
 
-    #############################################################################
-    # Conditions (the above are also similarly conditions but ok)
-    #############################################################################
+    # CA Conditions (the above are also similarly conditions but ok)
 
     conditions = True  # satisfied if nothing configured
 
@@ -466,21 +506,22 @@ def translate_policymodels_to_task(args, policyModels:List[PolicyModel], general
     if len(pm.condition_client_app_types) != 4:
       # Assumption: Selecting all 4 possible app types is equal to not selecting any
       conditions &= cp.any([getvar(VarType.CONDITION_CLIENT_APP_TYPE, capp) for capp in pm.condition_client_app_types])
-    if pm.condition_signin_risk_levels:
-      conditions &= cp.any([getvar(VarType.CONDITION_SIGNIN_RISK_LEVEL, level) for level in pm.condition_signin_risk_levels])
     if pm.condition_user_risk_levels:
       conditions &= cp.any([getvar(VarType.CONDITION_USER_RISK_LEVEL, level) for level in pm.condition_user_risk_levels])
+    if pm.condition_signin_risk_levels:
+      conditions &= cp.any([getvar(VarType.CONDITION_SIGNIN_RISK_LEVEL, level) for level in pm.condition_signin_risk_levels])
 
     # Grant controls
     grant_combinator = cp.any if pm.grant_operator == 'OR' else cp.all
     grant_controls = [getvar(VarType.BUILTIN_CONTROL, c) for c in pm.grant_builtin_controls]
     if pm.grant_authentication_strength:
-      grant_controls.append(authStrength)
+      pass # skip for now
+      # grant_controls.append(authStrength)
     control_requirement = grant_combinator(grant_controls)
 
     # Only one usergroup 
-    print(pm.name)
     policy = (user_selection & app_selection & conditions).implies(control_requirement)
+    print(pm.name)
     print(str(policy))
 
     # All ready for this policy
@@ -491,23 +532,72 @@ def translate_policymodels_to_task(args, policyModels:List[PolicyModel], general
   requirements.append(reduce(xor, all_vars[VarType.CONDITION_USER_GROUP].values()))         # Require 1 user group
   requirements.append(reduce(xor, all_vars[VarType.CONDITION_APPLICATION_GROUP].values()))  # Require 1 app group
   requirements.append(reduce(xor, all_vars[VarType.CONDITION_CLIENT_APP_TYPE].values()))  # Require 1 app group
-  requirements.append(reduce(xor, all_vars[VarType.CONDITION_SIGNIN_RISK_LEVEL].values()))  # Require 1
-  requirements.append(reduce(xor, all_vars[VarType.CONDITION_USER_RISK_LEVEL].values()))    # Require 1
+  if sign_in_risks := all_vars.get(VarType.CONDITION_SIGNIN_RISK_LEVEL):
+    requirements.append(reduce(xor, sign_in_risks.values()))  # Require 1 if used
+  if user_risks := all_vars.get(VarType.CONDITION_USER_RISK_LEVEL):
+    requirements.append(reduce(xor, user_risks.values()))     # Require 1 if used
 
-  # General requirements
-  requirements.append(~block)         # Block definitely needs to be avoided
-  requirements.append(~authStrength)  # Let's avoid auth strength requirement for now
-  requirements.append(~mfa)           # Avoid MFA?
+  # General task requirements
+  # requirements.append(~block)         # Block definitely needs to be avoided
 
-  model = cp.Model(*requirements)
+  # cost vector, cost-to-attack
+  for uag_id in sorted(generalInfo.disjoint_artificial_user_groups.keys()):
+    uag_binvar = all_vars[VarType.CONDITION_USER_GROUP][str(uag_id)]
+    cost = get_uag_cost(args, uag_id, generalInfo)
+    requirements.append(uag_binvar.implies(cost_user==cost))
+
+  for aag_id in sorted(generalInfo.disjoint_artificial_app_groups.keys()):
+    aag_binvar = all_vars[VarType.CONDITION_APPLICATION_GROUP][str(aag_id)]
+    cost = get_aag_cost(args, aag_id, generalInfo)
+    requirements.append(aag_binvar.implies(cost_app==cost))
+
+  for built_in_control_name in _seen_builtin_controls:
+    control_binvar = all_vars[VarType.BUILTIN_CONTROL][built_in_control_name]
+    cost_var = control_costs[built_in_control_name]
+    cost = get_builtin_control_cost(args, built_in_control_name, generalInfo)
+    requirements.append(control_binvar.implies(cost_var==cost))
+    requirements.append((~control_binvar).implies(cost_var==0))
+
+  if signin_risk_used := all_vars.get(VarType.CONDITION_SIGNIN_RISK_LEVEL):
+    for sign_in_risk_level, bvar in signin_risk_used.items():
+      cost = get_signin_risk_cost(args, sign_in_risk_level)
+      requirements.append(bvar.implies(cost_signin_risk==cost))
+  else:
+    requirements.append(cost_signin_risk==0)
+
+  if user_risk_used := all_vars.get(VarType.CONDITION_USER_RISK_LEVEL):
+    for user_risk_level, bvar in user_risk_used.items():
+      cost = get_user_risk_cost(args, user_risk_level)
+      requirements.append(bvar.implies(cost_user_risk==cost))
+  else:
+    requirements.append(cost_user_risk==0)
+
+  # for now
+  requirements.append(cost_auth_strength==0)
 
   displayed_vars = get_all_vars_for_display(all_vars)
-  solver = cp.SolverLookup.get('ortools', model)
+
   solutions = []
-  def collect():
-      solutions.append([x.value() for x in displayed_vars])
-  solver.solveAll(display=collect, solution_limit=50)
-  solutions_to_table(args, solutions, displayed_vars)
+
+  for i in range(0, args.number_of_solutions):
+    model = cp.Model(*requirements)
+
+    solver = cp.SolverLookup.get('ortools', model)
+    solver.objective(cp.sum(cost_vector), minimize=True)
+    solver.solve()
+
+    solutions.append([x.value() for x in displayed_vars])
+
+    # Ban the current solution from appearing again
+    requirements.append(~cp.all(x == x.value() for x in displayed_vars))
+
+    # Print solution
+    vars = ', '.join([x.name for x in displayed_vars if x.value()])
+    total_cost = sum([v.value() for v in cost_vector])
+    cost_parts = '+'.join([str(v.value()) for v in cost_vector])
+    print('Solution #%d: %s cost=%d (%s)' % (i, vars, total_cost, cost_parts))
+
+  # solutions_to_table(args, solutions, displayed_vars)
 
 def main():
   args = parser.parse_args()
