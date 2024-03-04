@@ -112,7 +112,7 @@ The tool will run following queries using az cli unless the result file exists a
 
 There will always be as many solutions as requested.
 
-Ideally, 
+Ideally, all the findings are intended omissions.
 
 
 # Caveats in editing Conditional Access policies
@@ -124,7 +124,13 @@ Ideally,
 - Conditional Access editor doesn't display what CA policies are similar to each other. Everything must be stated in the policy name.
 	- We are able to do visual comparisons in the ca-tharsis summary report
 
+To be verified:
+- Selecting all device platforms does not mean policy would apply to all platforms? If you select Windows, Linux, iOS, Android, will a FreeBSD User-Agent will be picked by the policy? It it would, why?
+	- We can handle this kind of situations by inserting an artificial UnmentionedPlatform like we handle applications.
+
 # Caveats in ca-tharsis tool
+
+In current state, likely buggy.
 
 Partial implementation (only checks if these are included or not)
 
@@ -142,13 +148,46 @@ Other:
 
 # Method (again but with images)
 
-TODO
+TODO: Add rest.
 
+## Step 3: Model
+
+```
+# Policy
+(and([or([UG1, UG2, UG3, UG4]), (AG0) or (AG1), (ClientAppType:exchangeActiveSync) or (ClientAppType:other)])) -> (Control:block),
+(and([or([UG2, UG3, UG4]), (AG0) or (AG1), (SigninRisk:medium) or (SigninRisk:high)])) -> (Control:mfa),
+((or([UG2, UG3, UG4])) and ((AG0) or (AG1))) -> (Control:mfa),
+boolval(True),  # seems like a CA policy which is enabled but does not contain anything
+
+# Additional task requirements
+UG1 xor UG2 xor UG3 xor UG4 xor UG0,
+AG0 xor AG1,
+ClientAppType:browser xor ClientAppType:mobileAppsAndDesktopClients xor ClientAppType:exchangeActiveSync xor ClientAppType:other,
+SigninRisk:none xor SigninRisk:medium xor SigninRisk:high,
+
+# Cost-to-attack weights, referring the cost vector indices
+(UG0) -> (IV0 == 1),
+(UG1) -> (IV0 == 2),
+(UG2) -> (IV0 == 17),
+(UG3) -> (IV0 == 1),
+(UG4) -> (IV0 == 1),
+(AG0) -> (IV1 == 2),
+(AG1) -> (IV1 == 1),
+(Control:block) -> (IV5 == 1000),
+(~Control:block) -> (IV5 == 0),
+(Control:mfa) -> (IV6 == 500),
+(~Control:mfa) -> (IV6 == 0),
+(SigninRisk:none) -> (IV3 == 30),
+(SigninRisk:medium) -> (IV3 == 5),
+(SigninRisk:high) -> (IV3 == 0),
+IV4 == 0, # Zero currently unused variables
+IV2 == 0
+```
 
 # Other work
 
-- what-if
-- Caoptics: use this
+- caOptics: https://github.com/jsa2/caOptics
 - Factorio-SAT Nothing do with Entra but looks cool [https://github.com/R-O-C-K-E-T/Factorio-SAT](https://github.com/R-O-C-K-E-T/Factorio-SAT)
-- Conditional access workbook
+- what-if tool: https://learn.microsoft.com/en-us/entra/identity/conditional-access/what-if-tool
+- Conditional access workbook: https://learn.microsoft.com/en-us/entra/identity/monitoring-health/workbook-conditional-access-gap-analyzer
 - Signin logs/panel
