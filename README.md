@@ -7,6 +7,8 @@
 
 This is an art project. Needing to use python-scraping-with-analysis to verify configuration of a premium cloud security platform is like sending a retired cop with technology anxiety to stop a cyber-attack.
 
+Project status: unstable PoC
+
 # Conditional Access policies
 
 In a Microsoft identity ecosystem, Microsoft Entra ID Conditional Access policies have an important role in defining required security controls for each login. As an oversimplication, they control whether or not Multi-Factor Authentication (MFA) requirement is applied.
@@ -141,6 +143,7 @@ Not implemented
 - Device filters with query
 - Application query filters
 - Location support
+- Guest memberships
 
 Other:
 
