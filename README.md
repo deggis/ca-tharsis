@@ -37,7 +37,7 @@ Note: Conditional Access policy editor uses terms like "assignment", "conditions
 
 CA policy set is a list of if-then rules. ca-tharsis needs to massage the definitions a bit before we can express the conditions as `cpmpy` if-then rules (logical implications).
 
-## Step 1: Minimize the need for variables
+## Step 1: Gather referenced data for policies
 
 - Policies can include and exclude target users directly or using groups or roles.
 - We first evaluate all members of all referenced groups or roles
@@ -46,17 +46,17 @@ CA policy set is a list of if-then rules. ca-tharsis needs to massage the defini
 
 Now, within these artificial user groups, **AUG's**, and application groups **AAG's**, all policies behave similarly. Pick any user from the same group and the `what-if` tool should give same results.
 
-## Step 2: Internal representation of policy objects
+## Step 2: Reduce policies to lists of booleans
 
-We dig the information for the rest of the referenced policy filters and re-create an internal representation for them.
+We dig the information for the rest of the referenced policy filters and re-create an internal representation for them: a list of booleans, yes/no flags, that are shared between all policies.
 
-As an accidental byproduct of this (especially the Step 1), we're able to create relatively compact reporting of existing policies using artificial user/application groups:
+As an accidental byproduct of this (especially the Step 1), we're able to create relatively compact reporting of existing policies using artificial user/application groups, for example:
 
 - How many and which users are targeted
 - How many and which applications are targeted
 - What controls are included
 
-## Step 3: Re-create the policy as logical model
+## Step 3: Translate the lists of booleans as cpmpy logical model
 
 Create a `cpmpy` model that consists of three parts:
 
@@ -71,13 +71,10 @@ Create a `cpmpy` model that consists of three parts:
 	- Same with application groups, user-risks and sign-in risks.
 3. cost-to-attack weights
 	- The goal is to find scenarios that present the cheapest cost-to-attack scenarios
-	- First we simply require that the sign-in is not resulting to block with `~block`.
-	- We got this far with boolean variables.
-	- For everything else, we create a numerical cost vector
-	- For all boolean variables, we assign a cost for being true
-	- This is the task we give to cpmpy: find solutions that 1) don't result in BLOCK, 2) minimize the cost vector.
+	- We create a numerical cost vector holding the cost for each boolean for being true
+	- This is the task we give to cpmpy: find solutions that minimize the cost vector.
 
-Additionally, we try to minimize the number of introduced variables to have easier time later in summarizing the report.
+Additionally, we try to minimize the number of introduced variables to have easier time later in summarizing the report and to help the solver.
 
 Main ideas about the cost vector:
 
