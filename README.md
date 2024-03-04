@@ -5,7 +5,7 @@
 
 *ca-tharsis project logo, ink on premium toilet paper, 2024*
 
-This is an art project. Needing to use python-scraping-with-analysis to verify configuration of a premium cloud security platform is like sending a retired cop with technology anxiety to stop a cyber-attack.
+This is an art project. Needing to use python-scraping-with-analysis to verify configuration of a premium cloud security platform is like needing to send a retired cop with technology anxiety to stop a cyber-attack.
 
 Project status: unstable PoC
 
@@ -76,6 +76,8 @@ Create a `cpmpy` model that consists of three parts:
 	- For everything else, we create a numerical cost vector
 	- For all boolean variables, we assign a cost for being true
 	- This is the task we give to cpmpy: find solutions that 1) don't result in BLOCK, 2) minimize the cost vector.
+
+Additionally, we try to minimize the number of introduced variables to have easier time later in summarizing the report.
 
 Main ideas about the cost vector:
 
