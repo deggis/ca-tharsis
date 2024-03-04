@@ -1,0 +1,3 @@
+cpmpy==0.9.19
+ortools==9.8.3296
+pandas==2.2.1
