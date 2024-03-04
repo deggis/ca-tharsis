@@ -5,7 +5,7 @@
 
 *ca-tharsis project logo, ink on premium toilet paper, 2024*
 
-This is an art project. Needing to use python-scraping-with-analysis to verify configuration of a premium cloud security platform is like needing to send a retired cop with technology anxiety to stop a cyber-attack.
+This is an art project. Needing to use python-scraping-with-analysis to review configuration of a  cloud identity platform is like needing to send a retired cop with technology anxiety to stop a cyber-attack.
 
 Project status: unstable PoC
 
