@@ -5,11 +5,11 @@
 
 *ca-tharsis project logo, ink on premium toilet paper, 2024*
 
-This is an art project. Needing to use python-scraping-with-analysis to verify configuration of a premium cloud security platform is like sending a retired cop with anxiety towards technology to stop a cyber-attack.
+This is an art project. Needing to use python-scraping-with-analysis to verify configuration of a premium cloud security platform is like sending a retired cop with technology anxiety to stop a cyber-attack.
 
 # Conditional Access policies
 
-In a Microsoft identity ecosystem, Microsoft Entra ID Conditional Access policies have an important role in defining required security controls for each login. As an oversimplication, they control whether or not MFA is applied.
+In a Microsoft identity ecosystem, Microsoft Entra ID Conditional Access policies have an important role in defining required security controls for each login. As an oversimplication, they control whether or not Multi-Factor Authentication (MFA) requirement is applied.
 
 All Conditional Access (CA) policies are evaluated for every sign-in, but if the login does not meet targeting of the policies, no additional controls are applied on top of username+password.
 
