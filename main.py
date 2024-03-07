@@ -8,6 +8,8 @@ from functools import cache, reduce
 from typing import List
 from enum import Enum, auto
 import operator
+import math
+import itertools
 
 import cpmpy as cp
 from cpmpy.solvers.ortools import OrtSolutionPrinter
@@ -429,21 +431,23 @@ def solutions_to_table(args, solutions, displayed_vars):
     out_f.write(mk_html5_doc("Solutions summary", df.to_html(classes='mystyle')))
 
 def get_uag_cost(args, uag_id, generalInfo:GeneralInfo):
-  return len(generalInfo.disjoint_artificial_user_groups[uag_id])  # FIXME
+  users_in_group = len(generalInfo.disjoint_artificial_user_groups[uag_id])
+  return math.floor((users_in_group / generalInfo.users_count) * 100)
 
 def get_aag_cost(args, aag_id, generalInfo:GeneralInfo):
-  return len(generalInfo.disjoint_artificial_app_groups[aag_id])  # FIXME
+  apps_in_group = len(generalInfo.disjoint_artificial_app_groups[aag_id])
+  # FIXME: differentiate apps
+  return math.floor((apps_in_group / generalInfo.apps_count) * 10)
 
 def get_builtin_control_cost(args, builtin_control_name, generalInfo:GeneralInfo):
   # FIXME
   costs = {
-    'block': 100,  # not needed if ~block required
-    'mfa': 50,
-    'compliantDevice': 25,
-    'domainJoinedDevice': 15,
-    'passwordChange': 20
+    'mfa': 10,
+    'compliantDevice': 6,
+    'domainJoinedDevice': 4,
+    'passwordChange': 8
   }
-  return costs.get(builtin_control_name, 50)
+  return costs.get(builtin_control_name, 5)
 
 def get_signin_risk_cost(args, level):
   return {
@@ -452,6 +456,14 @@ def get_signin_risk_cost(args, level):
     'medium': 3,
     'high': 1
   }[level]
+
+def get_client_app_type_cost(args, client_app):
+  return {
+    'browser': 1,
+    'mobileAppsAndDesktopClients': 3,
+    'other': 4,
+    'exchangeActiveSync': 5
+  }[client_app]
 
 def get_user_risk_cost(args, level):
   return get_signin_risk_cost(args, level)
@@ -482,16 +494,18 @@ def translate_policymodels_to_task(args, policyModels:List[PolicyModel], general
     _ = getvar(VarType.CONDITION_USER_RISK_LEVEL, 'none')
 
   _seen_builtin_controls = sorted(generalInfo.seen_builtin_controls)
-  cost_vector = cp.intvar(0,10, shape=5+len(_seen_builtin_controls))
-  cost_user = cost_vector[0]
-  cost_app = cost_vector[1]
-  cost_auth_strength = cost_vector[2]
-  cost_signin_risk = cost_vector[3]
-  cost_user_risk = cost_vector[4]
+  builtin_controls_without_block = [c for c in _seen_builtin_controls if c!='block']
+  cost_user = cp.intvar(0, 100)
+  cost_vector = cp.intvar(0,10, shape=5+len(builtin_controls_without_block))  # take block out
+  cost_app = cost_vector[0]
+  cost_auth_strength = cost_vector[1]
+  cost_signin_risk = cost_vector[2]
+  cost_user_risk = cost_vector[3]
+  cost_client_app_type = cost_vector[4]
 
   next_cost_i = 5
   control_costs = {}
-  for i, n in enumerate(_seen_builtin_controls):
+  for i, n in enumerate(builtin_controls_without_block):
     control_costs[n] = cost_vector[next_cost_i+i]
 
   for pm in policyModels:
@@ -516,7 +530,7 @@ def translate_policymodels_to_task(args, policyModels:List[PolicyModel], general
 
     # Grant controls
     grant_combinator = cp.any if pm.grant_operator == 'OR' else cp.all
-    grant_controls = [getvar(VarType.BUILTIN_CONTROL, c) for c in pm.grant_builtin_controls]
+    grant_controls = [getvar(VarType.BUILTIN_CONTROL, c) for c in pm.grant_builtin_controls if c != 'block']
     if pm.grant_authentication_strength:
       pass # skip for now
       # grant_controls.append(authStrength)
@@ -554,12 +568,20 @@ def translate_policymodels_to_task(args, policyModels:List[PolicyModel], general
     cost = get_aag_cost(args, aag_id, generalInfo)
     requirements.append(aag_binvar.implies(cost_app==cost))
 
-  for built_in_control_name in _seen_builtin_controls:
+  for built_in_control_name in builtin_controls_without_block:
     control_binvar = all_vars[VarType.BUILTIN_CONTROL][built_in_control_name]
     cost_var = control_costs[built_in_control_name]
     cost = get_builtin_control_cost(args, built_in_control_name, generalInfo)
     requirements.append(control_binvar.implies(cost_var==cost))
     requirements.append((~control_binvar).implies(cost_var==UNUSED_VARIABLE_COST))
+
+  if client_app_types := all_vars.get(VarType.CONDITION_CLIENT_APP_TYPE):
+    for client_app_type, bvar in client_app_types.items():
+      cost = get_client_app_type_cost(args, client_app_type)
+      requirements.append(bvar.implies(cost_client_app_type==cost))
+      requirements.append((~bvar).implies(cost_client_app_type==UNUSED_VARIABLE_COST))
+  else:
+    requirements.append(cost_client_app_type==UNUSED_VARIABLE_COST)
 
   if signin_risk_used := all_vars.get(VarType.CONDITION_SIGNIN_RISK_LEVEL):
     for sign_in_risk_level, bvar in signin_risk_used.items():
@@ -578,6 +600,8 @@ def translate_policymodels_to_task(args, policyModels:List[PolicyModel], general
   # for now
   requirements.append(cost_auth_strength==UNUSED_VARIABLE_COST)
 
+  requirements.append(~block)
+
   displayed_vars = get_all_vars_for_display(all_vars)
 
   solutions = []
@@ -586,8 +610,7 @@ def translate_policymodels_to_task(args, policyModels:List[PolicyModel], general
     model = cp.Model(*requirements)
 
     solver = cp.SolverLookup.get('ortools', model)
-    #total_cost = cost_vector.prod()
-    total_cost = reduce(operator.mul, cost_vector)
+    total_cost = cost_user * reduce(operator.mul, cost_vector)
     solver.objective(total_cost, minimize=True)
     solver.solve()
 
@@ -598,9 +621,9 @@ def translate_policymodels_to_task(args, policyModels:List[PolicyModel], general
 
     # Print solution
     vars = ', '.join([x.name for x in displayed_vars if x.value()])
-    total_cost = reduce(operator.mul, [v.value() for v in cost_vector])
-    cost_parts = '*'.join([str(v.value()) for v in cost_vector])
-    print('Solution #%d: %s cost=%d (%s)' % (i, vars, total_cost, cost_parts))
+    result = cost_user.value() * reduce(operator.mul, [v.value() for v in cost_vector])
+    cost_parts = '*'.join([str(v.value()) for v in itertools.chain([cost_user], cost_vector)])
+    print('Solution #%d: %s cost=%d (%s)' % (i, vars, result, cost_parts))
 
   # solutions_to_table(args, solutions, displayed_vars)
 
