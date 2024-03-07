@@ -7,6 +7,7 @@ import os
 from functools import cache, reduce
 from typing import List
 from enum import Enum, auto
+import operator
 
 import cpmpy as cp
 from cpmpy.solvers.ortools import OrtSolutionPrinter
@@ -70,6 +71,8 @@ MICROSOFT_ADMIN_PORTALS_APP = "MicrosoftAdminPortals"
 ALL_CLIENT_APP_TYPES = ['browser', 'mobileAppsAndDesktopClients', 'exchangeActiveSync', 'other']
 ALL_USER_RISK_LEVELS = ['high', 'medium', 'low', 'none']
 ALL_SIGNIN_RISK_LEVELS = ['high', 'medium', 'low', 'none']
+
+UNUSED_VARIABLE_COST=1
 
 def get_policy_defs(args):
   with open(mk_ca_path(args)) as in_f:
@@ -434,20 +437,20 @@ def get_aag_cost(args, aag_id, generalInfo:GeneralInfo):
 def get_builtin_control_cost(args, builtin_control_name, generalInfo:GeneralInfo):
   # FIXME
   costs = {
-    'block': 1000,  # not needed if ~block required
-    'mfa': 500,
-    'compliantDevice': 250,
-    'domainJoinedDevice': 150,
-    'passwordChange': 200
+    'block': 100,  # not needed if ~block required
+    'mfa': 50,
+    'compliantDevice': 25,
+    'domainJoinedDevice': 15,
+    'passwordChange': 20
   }
   return costs.get(builtin_control_name, 50)
 
 def get_signin_risk_cost(args, level):
   return {
-    'none': 30,
-    'low': 10,
-    'medium': 5,
-    'high': 0
+    'none': 10,
+    'low': 5,
+    'medium': 3,
+    'high': 1
   }[level]
 
 def get_user_risk_cost(args, level):
@@ -479,7 +482,7 @@ def translate_policymodels_to_task(args, policyModels:List[PolicyModel], general
     _ = getvar(VarType.CONDITION_USER_RISK_LEVEL, 'none')
 
   _seen_builtin_controls = sorted(generalInfo.seen_builtin_controls)
-  cost_vector = cp.intvar(0,1000, shape=5+len(_seen_builtin_controls))
+  cost_vector = cp.intvar(0,10, shape=5+len(_seen_builtin_controls))
   cost_user = cost_vector[0]
   cost_app = cost_vector[1]
   cost_auth_strength = cost_vector[2]
@@ -556,24 +559,24 @@ def translate_policymodels_to_task(args, policyModels:List[PolicyModel], general
     cost_var = control_costs[built_in_control_name]
     cost = get_builtin_control_cost(args, built_in_control_name, generalInfo)
     requirements.append(control_binvar.implies(cost_var==cost))
-    requirements.append((~control_binvar).implies(cost_var==0))
+    requirements.append((~control_binvar).implies(cost_var==UNUSED_VARIABLE_COST))
 
   if signin_risk_used := all_vars.get(VarType.CONDITION_SIGNIN_RISK_LEVEL):
     for sign_in_risk_level, bvar in signin_risk_used.items():
       cost = get_signin_risk_cost(args, sign_in_risk_level)
       requirements.append(bvar.implies(cost_signin_risk==cost))
   else:
-    requirements.append(cost_signin_risk==0)
+    requirements.append(cost_signin_risk==UNUSED_VARIABLE_COST)
 
   if user_risk_used := all_vars.get(VarType.CONDITION_USER_RISK_LEVEL):
     for user_risk_level, bvar in user_risk_used.items():
       cost = get_user_risk_cost(args, user_risk_level)
       requirements.append(bvar.implies(cost_user_risk==cost))
   else:
-    requirements.append(cost_user_risk==0)
+    requirements.append(cost_user_risk==UNUSED_VARIABLE_COST)
 
   # for now
-  requirements.append(cost_auth_strength==0)
+  requirements.append(cost_auth_strength==UNUSED_VARIABLE_COST)
 
   displayed_vars = get_all_vars_for_display(all_vars)
 
@@ -583,7 +586,9 @@ def translate_policymodels_to_task(args, policyModels:List[PolicyModel], general
     model = cp.Model(*requirements)
 
     solver = cp.SolverLookup.get('ortools', model)
-    solver.objective(cp.sum(cost_vector), minimize=True)
+    #total_cost = cost_vector.prod()
+    total_cost = reduce(operator.mul, cost_vector)
+    solver.objective(total_cost, minimize=True)
     solver.solve()
 
     solutions.append([x.value() for x in displayed_vars])
@@ -593,8 +598,8 @@ def translate_policymodels_to_task(args, policyModels:List[PolicyModel], general
 
     # Print solution
     vars = ', '.join([x.name for x in displayed_vars if x.value()])
-    total_cost = sum([v.value() for v in cost_vector])
-    cost_parts = '+'.join([str(v.value()) for v in cost_vector])
+    total_cost = reduce(operator.mul, [v.value() for v in cost_vector])
+    cost_parts = '*'.join([str(v.value()) for v in cost_vector])
     print('Solution #%d: %s cost=%d (%s)' % (i, vars, total_cost, cost_parts))
 
   # solutions_to_table(args, solutions, displayed_vars)
