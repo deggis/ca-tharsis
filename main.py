@@ -545,17 +545,27 @@ def translate_policymodels_to_task(args, policyModels:List[PolicyModel], general
     requirements.append(policy)
 
   # Selection requirements: in a solution one user should be accessing one app. These are represented by groups.
-  xor = lambda a,b: a^b
-  requirements.append(reduce(xor, all_vars[VarType.CONDITION_USER_GROUP].values()))         # Require 1 user group
-  requirements.append(reduce(xor, all_vars[VarType.CONDITION_APPLICATION_GROUP].values()))  # Require 1 app group
-  requirements.append(reduce(xor, all_vars[VarType.CONDITION_CLIENT_APP_TYPE].values()))  # Require 1 app group
-  if sign_in_risks := all_vars.get(VarType.CONDITION_SIGNIN_RISK_LEVEL):
-    requirements.append(reduce(xor, sign_in_risks.values()))  # Require 1 if used
-  if user_risks := all_vars.get(VarType.CONDITION_USER_RISK_LEVEL):
-    requirements.append(reduce(xor, user_risks.values()))     # Require 1 if used
+  def there_can_be_only_one(var_type):
+    bin_vars = list(all_vars[var_type].values())
+    for i in range(0, len(bin_vars)):
+      all_except_i = [bin_vars[j] for j in range(0, len(bin_vars)) if j!=i]
+      one_i = bin_vars[i]
+      # rule 1: if one true, no other can be
+      requirements.append(one_i.implies(~cp.any(all_except_i)))
+    # rule 2: at least one must be true
+    requirements.append(cp.any(bin_vars))
+
+  there_can_be_only_one(VarType.CONDITION_USER_GROUP)         # Require 1 user group
+  there_can_be_only_one(VarType.CONDITION_APPLICATION_GROUP)  # Require 1 app group
+  there_can_be_only_one(VarType.CONDITION_CLIENT_APP_TYPE)    # Require 1 client app type
+
+  if all_vars.get(VarType.CONDITION_SIGNIN_RISK_LEVEL):
+    there_can_be_only_one(VarType.CONDITION_SIGNIN_RISK_LEVEL)
+  if all_vars.get(VarType.CONDITION_USER_RISK_LEVEL):
+    there_can_be_only_one(VarType.CONDITION_USER_RISK_LEVEL)
 
   # General task requirements
-  # requirements.append(~block)         # Block definitely needs to be avoided
+  requirements.append(~block)
 
   # cost vector, cost-to-attack
   for uag_id in sorted(generalInfo.disjoint_artificial_user_groups.keys()):
@@ -599,8 +609,6 @@ def translate_policymodels_to_task(args, policyModels:List[PolicyModel], general
 
   # for now
   requirements.append(cost_auth_strength==UNUSED_VARIABLE_COST)
-
-  requirements.append(~block)
 
   displayed_vars = get_all_vars_for_display(all_vars)
 
