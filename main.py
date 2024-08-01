@@ -64,8 +64,10 @@ mk_ca_path = lambda args: os.path.join(args.work_dir, 'ca.json')
 mk_group_result_path = lambda args, group_id: os.path.join(args.work_dir, f'group_{group_id}.json')
 mk_role_result_path = lambda args, role_id: os.path.join(args.work_dir, f'role_{role_id}.json')
 mk_all_users_path = lambda args: os.path.join(args.work_dir, 'all_users.json')
+mk_users_licenses = lambda args: os.path.join(args.work_dir, 'licenses.json')
 mk_summary_report_path = lambda args: os.path.join(args.work_dir, 'summary_of_ca.html')
 mk_solutions_report_path = lambda args: os.path.join(args.work_dir, 'summary_solutions.html')
+
 
 META_APP_ALL_UNMETIONED_APPS = "RestOfTheApps"
 MICROSOFT_ADMIN_PORTALS_APP = "MicrosoftAdminPortals"
@@ -85,8 +87,12 @@ def get_policy_defs(args):
     else:
       return [p for p in policy_objects if p['state'] == 'enabled']
 
-def run_cmd(cmd_string):
-  subprocess.run(cmd_string, shell=True, capture_output=True)
+def run_cmd(cmd_string, parse=False):
+  r = subprocess.run(cmd_string, shell=True, capture_output=True)
+  if parse:
+    return json.loads(r.stdout.decode('utf-8'))
+  else:
+    return r.stdout
 
 def fetch_ca_policy(args):
   result_file = mk_ca_path(args)
@@ -106,32 +112,102 @@ def list_referred_groups_roles(args):
 
   return set(groups), set(roles)
 
+def get_licenses(args):
+  users_licenses_path = mk_users_licenses(args)
+  users_licenses_path_temp = users_licenses_path+'_temp'
+
+  users_licenses = {}
+  if os.path.exists(users_licenses_path):
+    with open(users_licenses_path) as in_f:
+      users_licenses = json.load(in_f)
+
+  def save():
+    with open(users_licenses_path, 'w') as out_f:
+      json.dump(users_licenses, out_f)
+
+  all_users = get_members(mk_all_users_path(args))
+  fetched = 0
+  c_users = len(all_users)
+  for i, user_id in enumerate(all_users):
+    if i % 50 == 0:
+      print('Licenses checked for users: %d/%d' % (i, c_users))
+    if user_id in users_licenses:
+      continue
+    url = f'https://graph.microsoft.com/v1.0/users/{user_id}/licenseDetails'
+    reply = run_cmd(f"az rest --uri '{url}'", parse=True)
+    users_licenses[user_id] = reply['value']
+    fetched += 1
+
+    if fetched % 10 == 0:
+      print('Licenses fetched: %d' % fetched)
+      save()
+  
+  save()
+  return users_licenses
+
+def _run_graph_user_query(args, result_path, initial_url):
+  temp_file = result_path+'_temp'
+  all_users = []
+
+  if os.path.exists(result_path):
+    return
+
+  run = True
+  next_link = None
+  while run:
+    url = next_link if next_link else initial_url
+    run_cmd(f"az rest --uri '{url}' > {temp_file}")
+    with open(temp_file) as in_f:
+      result = json.load(in_f)
+      next_link = result.get('@odata.nextLink')
+      for user in result['value']:
+        all_users.append(user)
+
+      if not next_link:
+        run = False
+
+  if not os.path.exists(temp_file):
+    os.remove(temp_file)
+
+  with open(result_path, 'w') as out_f:
+    # Emulate Graph response structure with 'value': {}
+    json.dump({'value': all_users}, out_f)
+
 def resolve_memberships_with_query(args):
   groups, roles = list_referred_groups_roles(args)
 
   for group_id in groups:
     group_result_file = mk_group_result_path(args, group_id)
     if not os.path.exists(group_result_file):
-      run_cmd(f'az rest --uri https://graph.microsoft.com/v1.0/groups/{group_id}/transitiveMembers > {group_result_file}')
+      group_url = f'https://graph.microsoft.com/v1.0/groups/{group_id}/transitiveMembers'
+      _run_graph_user_query(args, group_result_file, group_url)
 
   for role_id in roles:
     role_result_file = mk_role_result_path(args, role_id)
     if not os.path.exists(role_result_file):
-      run_cmd(f"az rest --uri https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments?$filter=roleDefinitionId+eq+'{role_id}' > {role_result_file}")
+      role_url = f"https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments?$filter=roleDefinitionId+eq+'{role_id}'"
+      _run_graph_user_query(args, role_result_file, role_url)
 
 def fetch_all_users(args):
-  all_users_result_path = mk_all_users_path(args)
-  if not os.path.exists(all_users_result_path):
-    run_cmd(f"az rest --uri https://graph.microsoft.com/v1.0/users > {all_users_result_path}")
+  _run_graph_user_query(args, mk_all_users_path(args), 'https://graph.microsoft.com/beta/users?select=id,accountenabled,userPrincipalName')
 
-def get_members(path):
+def get_members(path, req_user_active=False, req_user_guest=False, req_user_internal=False):
+  def user_filter(u):
+    if req_user_active and not u['accountEnabled']:
+      return False
+    if req_user_internal and '#EXT#@' in u['userPrincipalName']:
+      return False
+    if req_user_guest and '#EXT#@' not in u['userPrincipalName']:
+      return False
+    return True
+
   with open(path) as in_f:
     user_data = json.load(in_f)
 
     if 'role_' in path:
       return set([v['principalId'] for v in user_data['value']])
     else:
-      return set([v['id'] for v in user_data['value']])
+      return set([v['id'] for v in user_data['value'] if user_filter(v)])
 
 @cache
 def translate_app_guid(app_id):
@@ -156,7 +232,7 @@ def get_all_referenced_apps(args):
     apps.remove('None')
   return apps
 
-def resolve_members_for_policy_objects(args, all_users):
+def resolve_members_for_policy_objects(args, user_selection):
   # policy_id guid: set of user guids (lowercase)
   memberships = {}
 
@@ -164,7 +240,7 @@ def resolve_members_for_policy_objects(args, all_users):
     user_targeting = ca_policy['conditions']['users']
     included = set()
     if user_targeting['includeUsers'] == ['All']:
-      included = all_users.copy()
+      included = user_selection.copy()
     else:
       for includedRoleId in user_targeting['includeRoles']:
         included |= get_members(mk_role_result_path(args, includedRoleId))
@@ -188,7 +264,10 @@ def resolve_members_for_policy_objects(args, all_users):
         included.remove(excludedUserId)
     # FIXME: check excludeGuestsOrExternalUsers
 
-    memberships[ca_policy['id']] = included
+    if user_selection:
+      memberships[ca_policy['id']] = included & user_selection
+    else:
+      memberships[ca_policy['id']] = included
   return memberships
 
 def resolve_apps_for_policy_objects(args, all_apps):
@@ -210,11 +289,10 @@ def resolve_apps_for_policy_objects(args, all_apps):
     memberships[ca_policy['id']] = included
   return memberships  
 
-def create_policymodels(args):
+def create_policymodels(args, user_selection):
   # Users
-  all_users = get_members(mk_all_users_path(args))
-  policy_user_memberships = resolve_members_for_policy_objects(args, all_users)
-  policy_user_memberships['all_meta'] = all_users.copy()
+  policy_user_memberships = resolve_members_for_policy_objects(args, user_selection)
+  policy_user_memberships['all_meta'] = user_selection.copy()
 
   users_task = [GroupMembers(name=policy_id, members=members)
       for policy_id, members in policy_user_memberships.items()]
@@ -297,14 +375,14 @@ def create_policymodels(args):
     disjoint_artificial_app_groups=dja_app_groups,
     seen_builtin_controls=seen_builtin_controls,
     seen_app_user_actions=seen_app_user_actions,
-    users_count=len(all_users),
+    users_count=len(user_selection),
     apps_count=len(all_apps)
   )
 
   return policyModels, generalInfo
 
 
-mk_html5_doc = lambda title, table: """
+mk_html5_doc = lambda title, body_content: """
 <html>
   <head>
     <style type="text/css">
@@ -325,15 +403,36 @@ mk_html5_doc = lambda title, table: """
         cursor: pointer;
       }
     </style>
+    <title>%s</title>
   </head>
+
   <body>
   <h1>%s</h1>
-
   %s
   </body>
-""" % (title, table)
+""" % (title, title, body_content)
 
-def create_report(args, policyModels:List[PolicyModel], generalInfo:GeneralInfo):
+def get_all_members(args):
+  with open(mk_all_users_path(args)) as in_f:
+    data = json.load(in_f)
+  result = {}
+  for item in data['value']:
+    result[item['id']] = item
+  return result
+
+def create_additional_section(args, policyModels, generalInfo:GeneralInfo):
+  users_by_ids = get_all_members(args)
+
+  s = '<ul>'
+  s += '<li>Total users in section: %s</li>' % generalInfo.users_count
+  for ug_id, user_ids in generalInfo.disjoint_artificial_user_groups.items():
+    example_user = sorted(list(user_ids))[0]
+    s += '<li>User group %d: Users: %d. Example user: %s</li>' % (ug_id, len(user_ids), users_by_ids[example_user]['userPrincipalName'])
+  s += '</ul>'
+  return s
+
+
+def create_report_section(args, policyModels:List[PolicyModel], generalInfo:GeneralInfo, title):
   pms = sorted(policyModels, key=lambda x: (not x.enabled, x.name))
 
   d = {
@@ -364,8 +463,14 @@ def create_report(args, policyModels:List[PolicyModel], generalInfo:GeneralInfo)
 
   df = pd.DataFrame(data=d)
 
-  with open(mk_summary_report_path(args), 'w') as out_f:
-    out_f.write(mk_html5_doc("Policy summary", df.to_html(classes='mystyle')))
+  additional = create_additional_section(args, policyModels, generalInfo)
+
+  body_part = ''
+  body_part += f'<h2>{title}</h2>'
+  body_part += df.to_html(classes='mystyle')
+  body_part += additional
+
+  return body_part
 
 class VarType(Enum):
     CONDITION_USER_GROUP = auto()
@@ -470,7 +575,7 @@ def get_user_risk_cost(args, level):
 
 def translate_policymodels_to_task(args, policyModels:List[PolicyModel], generalInfo:GeneralInfo):
   requirements = []
-  all_vars = {}
+  all_vars: dict = {}
   def getvar(vtype, id_:str):
     bv = get_boolvar(vtype, id_, policyModels, generalInfo)
     type_catalog = all_vars.setdefault(vtype, {})
@@ -569,8 +674,12 @@ def translate_policymodels_to_task(args, policyModels:List[PolicyModel], general
 
   # cost vector, cost-to-attack
   for uag_id in sorted(generalInfo.disjoint_artificial_user_groups.keys()):
-    uag_binvar = all_vars[VarType.CONDITION_USER_GROUP][str(uag_id)]
+    # uag_binvar = all_vars[VarType.CONDITION_USER_GROUP][str(uag_id)]
+    # Exception: What? An UAG was created but no policy referenced it? Bug in a policy or here?
+    uag_binvar = getvar(VarType.CONDITION_USER_GROUP, str(uag_id))
     cost = get_uag_cost(args, uag_id, generalInfo)
+    if cost is None:
+      print('No cost?')
     requirements.append(uag_binvar.implies(cost_user==cost))
 
   for aag_id in sorted(generalInfo.disjoint_artificial_app_groups.keys()):
@@ -622,6 +731,10 @@ def translate_policymodels_to_task(args, policyModels:List[PolicyModel], general
     solver.objective(total_cost, minimize=True)
     solver.solve()
 
+    if not(any([x.value() for x in displayed_vars])):
+      print('This is not actually a solution')
+      break
+
     solutions.append([x.value() for x in displayed_vars])
 
     # Ban the current solution from appearing again
@@ -635,6 +748,10 @@ def translate_policymodels_to_task(args, policyModels:List[PolicyModel], general
 
   # solutions_to_table(args, solutions, displayed_vars)
 
+def count_s(a, b):
+  frac = math.floor(a / b * 100)
+  return '%d of %d / %s %%' % (a,b,frac)
+
 def main():
   args = parser.parse_args()
   if not os.path.exists(args.work_dir):
@@ -642,13 +759,32 @@ def main():
   fetch_ca_policy(args)
   resolve_memberships_with_query(args)
   fetch_all_users(args)
+  get_licenses(args)
 
+  body_content = ''
+  all_users = get_members(mk_all_users_path(args))
   # create pre-model separately and translate it later to cpmpy
-  policy_models, generalInfo = create_policymodels(args)
-  create_report(args, policy_models, generalInfo)
+  policy_models, generalInfo = create_policymodels(args, user_selection=all_users)
+  body_content += create_report_section(args, policy_models, generalInfo, 'All users')
+
+  users = get_members(mk_all_users_path(args), req_user_active=True)
+  policy_models, generalInfo = create_policymodels(args, user_selection=users)
+  body_content += create_report_section(args, policy_models, generalInfo, 'All active users (%s)' % count_s(len(users), len(all_users)))
+
+  users = get_members(mk_all_users_path(args), req_user_active=True, req_user_internal=True)
+  policy_models, generalInfo = create_policymodels(args, user_selection=users)
+  body_content += create_report_section(args, policy_models, generalInfo, 'All active & internal (%s)' % count_s(len(users), len(all_users)))
+
+  users = get_members(mk_all_users_path(args), req_user_active=True, req_user_guest=True)
+  policy_models, generalInfo = create_policymodels(args, user_selection=users)
+  body_content += create_report_section(args, policy_models, generalInfo, 'All active & guest (%s)' % count_s(len(users), len(all_users)))
+
+  with open(mk_summary_report_path(args), 'w') as out_f:
+    out_f.write(mk_html5_doc('CA report', body_content))
+
 
   # create model
-  translate_policymodels_to_task(args, policy_models, generalInfo)
+  # translate_policymodels_to_task(args, policy_models, generalInfo)
 
 if __name__ == '__main__':
   main()
