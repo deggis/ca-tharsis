@@ -1,6 +1,7 @@
 import argparse
 import glob
 import json
+import csv
 from os.path import join as path_join
 import subprocess
 import os
@@ -58,14 +59,18 @@ parser = argparse.ArgumentParser(
 parser.add_argument('work_dir', type=str)
 parser.add_argument('--include-report-only', action='store_true')
 parser.add_argument('--create-queries', action='store_true')
+parser.add_argument('--get-licenses-from-graph', action='store_true', help='Get assigned licenses from Graph API, user per user (slow)')
 parser.add_argument('--number-of-solutions', type=int, default=5)
 
 mk_ca_path = lambda args: os.path.join(args.work_dir, 'ca.json')
 mk_group_result_path = lambda args, group_id: os.path.join(args.work_dir, f'group_{group_id}.json')
-mk_role_result_path = lambda args, role_id: os.path.join(args.work_dir, f'role_{role_id}.json')
+mk_role_result_raw_path = lambda args, role_id: os.path.join(args.work_dir, f'role_{role_id}_raw.json')
+mk_role_result_resolved_path = lambda args, role_id: os.path.join(args.work_dir, f'role_{role_id}_resolved.json')
 mk_all_users_path = lambda args: os.path.join(args.work_dir, 'all_users.json')
 mk_users_licenses = lambda args: os.path.join(args.work_dir, 'licenses.json')
 mk_summary_report_path = lambda args: os.path.join(args.work_dir, 'summary_of_ca.html')
+mk_report_csv_path = lambda args, report, ug_name: os.path.join(args.work_dir, f'report_{report}_group_{ug_name}_members.csv')
+mk_report_ca_coverage_path = lambda args, report: os.path.join(args.work_dir, f'report_{report}_coverage.csv')
 mk_solutions_report_path = lambda args: os.path.join(args.work_dir, 'summary_solutions.html')
 
 
@@ -88,7 +93,12 @@ def get_policy_defs(args):
       return [p for p in policy_objects if p['state'] == 'enabled']
 
 def run_cmd(cmd_string, parse=False):
+  print(f'run_cmd {cmd_string}')
   r = subprocess.run(cmd_string, shell=True, capture_output=True)
+  if r.returncode != 0:
+    err = r.stderr.decode('utf-8')
+    print('run_cmd (%s), got error: %s' % (cmd_string, err))
+    raise Exception(err)
   if parse:
     return json.loads(r.stdout.decode('utf-8'))
   else:
@@ -113,6 +123,11 @@ def list_referred_groups_roles(args):
   return set(groups), set(roles)
 
 def get_licenses(args):
+  """
+  No bulk download option in API for all users at once?
+  This is slow.
+  """
+
   users_licenses_path = mk_users_licenses(args)
   users_licenses_path_temp = users_licenses_path+'_temp'
 
@@ -134,7 +149,7 @@ def get_licenses(args):
     if user_id in users_licenses:
       continue
     url = f'https://graph.microsoft.com/v1.0/users/{user_id}/licenseDetails'
-    reply = run_cmd(f"az rest --uri '{url}'", parse=True)
+    reply = run_cmd(f"az rest --uri \"{url}\"", parse=True)
     users_licenses[user_id] = reply['value']
     fetched += 1
 
@@ -156,9 +171,11 @@ def _run_graph_user_query(args, result_path, initial_url):
   next_link = None
   while run:
     url = next_link if next_link else initial_url
-    run_cmd(f"az rest --uri '{url}' > {temp_file}")
+    cmd = f"az rest --uri \"{url}\" > {temp_file}"
+    run_cmd(cmd)
     with open(temp_file) as in_f:
       result = json.load(in_f)
+      print('Allright: Cmd: %s' % cmd)
       next_link = result.get('@odata.nextLink')
       for user in result['value']:
         all_users.append(user)
@@ -176,6 +193,28 @@ def _run_graph_user_query(args, result_path, initial_url):
 def resolve_memberships_with_query(args):
   groups, roles = list_referred_groups_roles(args)
 
+  for role_id in roles:
+    # Check raw role files
+    role_result_file = mk_role_result_raw_path(args, role_id)
+
+    # Step 1: Get raw role assignment data
+    if not os.path.exists(role_result_file):
+      # https://learn.microsoft.com/en-us/graph/api/rbacapplication-list-roleassignments?view=graph-rest-1.0&tabs=http#example-1-request-using-a-filter-on-roledefinitionid-and-expand-the-principal-object
+      role_url = f"https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments?\\$filter=roleDefinitionId+eq+'{role_id}'&\\$expand=Principal"
+      _run_graph_user_query(args, role_result_file, role_url)
+
+    # Step 2: Check if role assignment references groups
+    with open(role_result_file) as in_f:
+      content = json.load(in_f)['value']
+      for assignment in content:
+        assigned_object_type = assignment['principal']['@odata.type']
+        if assigned_object_type == '#microsoft.graph.group':
+          groups.add(assignment['principalId'])
+        elif assigned_object_type == '#microsoft.graph.user':
+          pass
+        else:
+          raise Exception('Unknown referenced principal type: %s' % assigned_object_type)
+
   for group_id in groups:
     group_result_file = mk_group_result_path(args, group_id)
     if not os.path.exists(group_result_file):
@@ -183,10 +222,28 @@ def resolve_memberships_with_query(args):
       _run_graph_user_query(args, group_result_file, group_url)
 
   for role_id in roles:
-    role_result_file = mk_role_result_path(args, role_id)
-    if not os.path.exists(role_result_file):
-      role_url = f"https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments?$filter=roleDefinitionId+eq+'{role_id}'"
-      _run_graph_user_query(args, role_result_file, role_url)
+    role_resolved_result_fn = mk_role_result_resolved_path(args, role_id)
+    if os.path.exists(role_resolved_result_fn):
+      continue
+  
+    role_raw_result_fn = mk_role_result_raw_path(args, role_id)
+    with open(role_raw_result_fn) as in_f:
+      content = json.load(in_f)['value']
+    principals = []
+
+    for assignment in content:
+      assigned_object_type = assignment['principal']['@odata.type']
+      if assigned_object_type == '#microsoft.graph.group':
+        for member in get_members(mk_group_result_path(args, assignment['principalId'])):
+          principals.append({'principalId': member})
+      elif assigned_object_type == '#microsoft.graph.user':
+        principals.append({'principalId': assignment['principalId']})
+      else:
+        raise Exception('Unknown referenced principal type: %s' % assigned_object_type)
+
+    with open(role_resolved_result_fn, 'w') as out_f:
+      resolved_result = {'value': principals}
+      json.dump(resolved_result, out_f)
 
 def fetch_all_users(args):
   _run_graph_user_query(args, mk_all_users_path(args), 'https://graph.microsoft.com/beta/users?select=id,accountenabled,userPrincipalName')
@@ -243,15 +300,15 @@ def resolve_members_for_policy_objects(args, user_selection):
       included = user_selection.copy()
     else:
       for includedRoleId in user_targeting['includeRoles']:
-        included |= get_members(mk_role_result_path(args, includedRoleId))
+        included |= get_members(mk_role_result_resolved_path(args, includedRoleId))
       for includedGroupId in user_targeting['includeGroups']:
         included |= get_members(mk_group_result_path(args, includedGroupId))
       for includedUserId in user_targeting['includeUsers']:
         included.add(includedUserId)
       # FIXME: check includeGuestsOrExternalUsers
-    
+
     for excludedRoleId in user_targeting['excludeRoles']:
-      for excludedMember in get_members(mk_role_result_path(args, excludedRoleId)):
+      for excludedMember in get_members(mk_role_result_resolved_path(args, excludedRoleId)):
         if excludedMember in included:
           included.remove(excludedMember)
     for excludedGroupId in user_targeting['excludeGroups']:
@@ -268,6 +325,7 @@ def resolve_members_for_policy_objects(args, user_selection):
       memberships[ca_policy['id']] = included & user_selection
     else:
       memberships[ca_policy['id']] = included
+    
   return memberships
 
 def resolve_apps_for_policy_objects(args, all_apps):
@@ -469,6 +527,41 @@ def create_report_section(args, policyModels:List[PolicyModel], generalInfo:Gene
   body_part += f'<h2>{title}</h2>'
   body_part += df.to_html(classes='mystyle')
   body_part += additional
+
+
+  title_fn = title.replace(' ', '_').replace('&', '-')
+
+  with open(mk_all_users_path(args)) as in_f:
+    user_data = {}
+    for member in json.load(in_f)['value']:
+      user_data[member['id']] = member
+
+  for ug, members in generalInfo.disjoint_artificial_user_groups.items():
+    if '(' in title_fn:
+      title_fn = title_fn[:title_fn.index('(')]
+    fn = mk_report_csv_path(args, report=title_fn, ug_name='UG%s' % ug)
+    with open(fn, 'w') as out_f:
+      fieldnames = ['id', 'upn', 'accountEnabled', 'roles']
+      writer = csv.DictWriter(out_f, fieldnames=fieldnames, dialect=csv.excel)
+      writer.writeheader()
+      for member in members:
+        user = user_data[member]
+        writer.writerow({
+          'id': user['id'],
+          'upn': user['userPrincipalName'],
+          'accountEnabled': user['accountEnabled'],
+          'roles': ''
+        })
+    
+  with open(mk_report_ca_coverage_path(args, title_fn), 'w') as out_f:
+    fieldnames = ['ca_name', 'assigned_users']
+    writer = csv.DictWriter(out_f, fieldnames=fieldnames, dialect=csv.excel)
+    writer.writeheader()
+    for pm in pms:
+      writer.writerow({
+        'ca_name': pm.name,
+        'assigned_users': len(pm.members)
+      })
 
   return body_part
 
@@ -752,6 +845,10 @@ def count_s(a, b):
   frac = math.floor(a / b * 100)
   return '%d of %d / %s %%' % (a,b,frac)
 
+def display_warnings(args):
+  # https://learn.microsoft.com/en-us/entra/identity/conditional-access/migrate-approved-client-app
+  pass
+
 def main():
   args = parser.parse_args()
   if not os.path.exists(args.work_dir):
@@ -759,7 +856,8 @@ def main():
   fetch_ca_policy(args)
   resolve_memberships_with_query(args)
   fetch_all_users(args)
-  get_licenses(args)
+  if args.get_licenses_from_graph:
+    get_licenses(args)
 
   body_content = ''
   all_users = get_members(mk_all_users_path(args))
@@ -785,6 +883,8 @@ def main():
 
   # create model
   # translate_policymodels_to_task(args, policy_models, generalInfo)
+
+  # display warnings
 
 if __name__ == '__main__':
   main()
