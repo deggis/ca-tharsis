@@ -12,8 +12,15 @@ import operator
 import math
 import itertools
 
-import cpmpy as cp
-from cpmpy.solvers.ortools import OrtSolutionPrinter
+solver_imports_available = True
+try:
+  import cpmpy as cp
+  from cpmpy.solvers.ortools import OrtSolutionPrinter
+except ImportError:
+  cp = None
+  OrtSolutionPrinter = None
+  solver_imports_available = False
+
 import pandas as pd
 
 from disjoint_sets import split_to_disjoint_sets, GroupMembers
@@ -63,6 +70,7 @@ parser.add_argument('--include-report-only', action='store_true')
 parser.add_argument('--create-queries', action='store_true')
 parser.add_argument('--get-licenses-from-graph', action='store_true', help='Get assigned licenses from Graph API, user per user (slow)')
 parser.add_argument('--number-of-solutions', type=int, default=5)
+parser.add_argument('--use-solver', action='store_true')
 
 mk_ca_path = lambda args: os.path.join(args.work_dir, 'ca.json')
 mk_group_result_path = lambda args, group_id: os.path.join(args.work_dir, f'group_{group_id}.json')
@@ -872,6 +880,10 @@ def display_warnings(args):
 
 def main():
   args = parser.parse_args()
+
+  if args.use_solver and not solver_imports_available:
+    raise Exception("cpmpy related libraries are not available!")
+
   if not os.path.exists(args.work_dir):
     os.makedirs(args.work_dir)
   fetch_ca_policy(args)
@@ -903,7 +915,8 @@ def main():
 
 
   # create model
-  # translate_policymodels_to_task(args, policy_models, generalInfo)
+  if args.use_solver:
+    translate_policymodels_to_task(args, policy_models, generalInfo)
 
   # display warnings
 
