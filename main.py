@@ -36,14 +36,16 @@ PolicyModel = namedtuple('PolicyModel', [
   'condition_user_risk_levels',
   # Controls
   'grant_operator', # And, Or, Block, None
-  'grant_builtin_controls',
-  'grant_authentication_strength'
+  'grant_controls',
+  'grant_authentication_strength',
+  'session_controls'
 ])
 
 GeneralInfo = namedtuple('GeneralInfo', [
   'disjoint_artificial_user_groups',
   'disjoint_artificial_app_groups',
-  'seen_builtin_controls',
+  'seen_grant_controls',
+  'seen_session_controls',
   'seen_app_user_actions',
   'users_count',
   'apps_count'
@@ -347,6 +349,17 @@ def resolve_apps_for_policy_objects(args, all_apps):
     memberships[ca_policy['id']] = included
   return memberships  
 
+def translate_session_controls(session_control_list):
+  if not session_control_list:
+    return []
+  session_controls = []
+  for control, state in session_control_list.items():
+    if state is not None:
+      session_controls.append('session_%s' % control)
+  return session_controls
+
+
+
 def create_policymodels(args, user_selection):
   # Users
   policy_user_memberships = resolve_members_for_policy_objects(args, user_selection)
@@ -365,7 +378,8 @@ def create_policymodels(args, user_selection):
       for policy_id, members in policy_app_memberships.items()]
   policy_app_groups, dja_app_groups = split_to_disjoint_sets(apps_task)
 
-  seen_builtin_controls = set()
+  seen_grant_controls = set()
+  seen_session_controls = set()
   seen_app_user_actions = set()
 
   # Create models
@@ -373,27 +387,28 @@ def create_policymodels(args, user_selection):
   for ca_policy in get_policy_defs(args):
     enabled = ca_policy['state'] == 'enabled'
     policy_id = ca_policy['id']
-    grant_controls = ca_policy['grantControls']
-    if not grant_controls:
-      continue
 
     if not policy_user_groups[policy_id]:
       # Policy targets nobody. Does even less than audit mode.
       continue
     
     # Grant controls
-    grant_controls = ca_policy['grantControls']
+    ca_grant_controls = ca_policy['grantControls']
     grant_operator = None  # only session controls if this is none
-    grant_builtin_controls = None
-    if grant_controls:
+    if ca_grant_controls:
       #elif grant_controls['operator'] in ["OR", "AND"]:
-      grant_operator = grant_controls['operator']
-      grant_builtin_controls = grant_controls['builtInControls']
-      seen_builtin_controls.update(grant_builtin_controls)
-
+      grant_operator = ca_grant_controls['operator']
+      grant_controls = ca_grant_controls['builtInControls']
+      seen_grant_controls.update(grant_controls)
+   
     authenticationStrength = None
-    if strength := grant_controls.get('authenticationStrength'):
-      authenticationStrength = strength
+    if ca_grant_controls:
+      if strength := ca_grant_controls.get('authenticationStrength'):
+        authenticationStrength = strength
+
+    # Session controls
+    session_controls = translate_session_controls(ca_policy['sessionControls'])
+    seen_session_controls.update(session_controls)
 
     conditions = ca_policy['conditions']
 
@@ -424,14 +439,16 @@ def create_policymodels(args, user_selection):
       condition_signin_risk_levels=signin_risk_levels,
       condition_user_risk_levels=user_risk_levels,
       grant_operator=grant_operator,
-      grant_builtin_controls=grant_builtin_controls,
-      grant_authentication_strength=authenticationStrength
+      grant_controls=grant_controls,
+      grant_authentication_strength=authenticationStrength,
+      session_controls=session_controls
     ))
   
   generalInfo = GeneralInfo(
     disjoint_artificial_user_groups=dja_user_groups,
     disjoint_artificial_app_groups=dja_app_groups,
-    seen_builtin_controls=seen_builtin_controls,
+    seen_grant_controls=seen_grant_controls,
+    seen_session_controls=seen_session_controls,
     seen_app_user_actions=seen_app_user_actions,
     users_count=len(user_selection),
     apps_count=len(all_apps)
@@ -495,7 +512,8 @@ def create_report_section(args, policyModels:List[PolicyModel], generalInfo:Gene
 
   d = {
      'Name': [p.name for p in pms],
-     'Enabled': [str(p.enabled) for p in pms]
+     'On': [str(p.enabled) for p in pms],
+     'Users': [len(p.members) for p in pms]
   }
   def x(b):
     return 'X' if b else ''
@@ -516,8 +534,11 @@ def create_report_section(args, policyModels:List[PolicyModel], generalInfo:Gene
 
   d['C:operator'] = [p.grant_operator for p in pms]
 
-  for builtin in sorted(list(generalInfo.seen_builtin_controls)):
-    d['C:%s' % builtin] = [x(builtin in p.grant_builtin_controls) for p in pms]
+  for control in sorted(list(generalInfo.seen_grant_controls)):
+    d['GC:%s' % control] = [x(control in p.grant_controls) for p in pms]
+
+  for control in sorted(list(generalInfo.seen_session_controls)):
+    d['SC:%s' % control] = [x(control in p.session_controls) for p in pms]
 
   df = pd.DataFrame(data=d)
 
@@ -691,7 +712,7 @@ def translate_policymodels_to_task(args, policyModels:List[PolicyModel], general
   if any([bool(pm.condition_user_risk_levels) for pm in policyModels]):
     _ = getvar(VarType.CONDITION_USER_RISK_LEVEL, 'none')
 
-  _seen_builtin_controls = sorted(generalInfo.seen_builtin_controls)
+  _seen_builtin_controls = sorted(generalInfo.seen_grant_controls)
   builtin_controls_without_block = [c for c in _seen_builtin_controls if c!='block']
   cost_user = cp.intvar(0, 100)
   cost_vector = cp.intvar(0,10, shape=5+len(builtin_controls_without_block))  # take block out
@@ -728,7 +749,7 @@ def translate_policymodels_to_task(args, policyModels:List[PolicyModel], general
 
     # Grant controls
     grant_combinator = cp.any if pm.grant_operator == 'OR' else cp.all
-    grant_controls = [getvar(VarType.BUILTIN_CONTROL, c) for c in pm.grant_builtin_controls if c != 'block']
+    grant_controls = [getvar(VarType.BUILTIN_CONTROL, c) for c in pm.grant_controls if c != 'block']
     if pm.grant_authentication_strength:
       pass # skip for now
       # grant_controls.append(authStrength)
