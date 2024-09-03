@@ -179,26 +179,42 @@ def _run_graph_user_query(args, result_path, initial_url):
 
   run = True
   next_link = None
+  result_missing = False
+
   while run:
     url = next_link if next_link else initial_url
     cmd = f"az rest --uri \"{url}\" > {temp_file}"
-    run_cmd(cmd)
-    with open(temp_file) as in_f:
-      result = json.load(in_f)
-      print('Allright: Cmd: %s' % cmd)
-      next_link = result.get('@odata.nextLink')
-      for user in result['value']:
-        all_users.append(user)
 
-      if not next_link:
+    try:
+      run_cmd(cmd)
+      with open(temp_file) as in_f:
+        result = json.load(in_f)
+        print('Allright: Cmd: %s' % cmd)
+        next_link = result.get('@odata.nextLink')
+        for user in result['value']:
+          all_users.append(user)
+
+        if not next_link:
+          run = False
+    except Exception as e:
+      if 'does not exist or one of its queried reference-property objects are not present' in str(e):
         run = False
+        result_missing = True
+      else:
+        raise e
 
   if not os.path.exists(temp_file):
     os.remove(temp_file)
 
-  with open(result_path, 'w') as out_f:
-    # Emulate Graph response structure with 'value': {}
-    json.dump({'value': all_users}, out_f)
+  if not result_missing:
+    with open(result_path, 'w') as out_f:
+      # Emulate Graph response structure with 'value': {}
+      json.dump({'value': all_users}, out_f)
+  else:
+    with open(result_path, 'w') as out_f:
+      # Emulate Graph response structure with 'value': {}
+      # TODO: add warnings of these
+      json.dump({'value': [], 'resource_was_deleted': True}, out_f)
 
 def resolve_memberships_with_query(args):
   groups, roles = list_referred_groups_roles(args)
