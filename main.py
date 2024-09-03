@@ -190,7 +190,7 @@ def _run_graph_user_query(args, result_path, initial_url):
       with open(temp_file) as in_f:
         result = json.load(in_f)
         print('Allright: Cmd: %s' % cmd)
-        next_link = result.get('@odata.nextLink')
+        next_link = result.get('@odata.nextLink').replace('$', '\\$')  # TODO: get rid of shell
         for user in result['value']:
           all_users.append(user)
 
