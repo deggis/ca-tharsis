@@ -20,9 +20,6 @@ def split_to_disjoint_sets(groups: [GroupMembers]):
 
   task_groups = [_Group(g.name, set(g.members), []) for g in groups]
 
-  referenced_users = set().union(*[tg.unreferencedMembers for tg in task_groups])
-  # not_referenced_users = all_members - referenced_users
-
   def pick_any_unreferenced_members():
     currently_unreferenced_members = list(set().union(*[tg.unreferencedMembers for tg in task_groups]))
     if not currently_unreferenced_members:
@@ -56,23 +53,26 @@ def split_to_disjoint_sets(groups: [GroupMembers]):
   plain_groups = {g.name: g.artificialGroups for g in task_groups}
   return (plain_groups, artificial_groups)
 
-def main():
-  # all_users = set(range(1,23))
-  pol1_users = set(range(1,21))
-  pol2_users = set(range(1,7))
-  pol3_users = set(range(1,17))
-  pol4_users = set([4,10,11])
-  pol5_users = set([6])
+def split_to_disjoint_sets_ordered(groups: [GroupMembers]):
+  def ag_key(user_ids):
+    first_id = sorted(user_ids)[0]
+    # ids guaranteed to differ: group members don't belong to multiple groups
+    return -len(user_ids), first_id
 
-  groups = [
-    GroupMembers('pol1', pol1_users),
-    GroupMembers('pol2', pol2_users),
-    GroupMembers('pol3', pol3_users),
-    GroupMembers('pol4', pol4_users),
-    GroupMembers('pol5', pol5_users)
-  ]
+  unsorted_task_groups, unsorted_artificial_groups = split_to_disjoint_sets(groups)
 
-  task_groups, artificial_groups = split_to_disjoint_sets(groups)
+  sorted_group_ids = sorted(unsorted_artificial_groups.keys(), key=lambda x: ag_key(unsorted_artificial_groups[x]))
 
-if __name__ == '__main__':
-  main()
+  translation = {}
+  for i in range(0, len(sorted_group_ids)):
+    translation[sorted_group_ids[i]] = i
+
+  sorted_task_groups, sorted_artificial_groups = {}, {}
+
+  for from_id, to_id in translation.items():
+    sorted_artificial_groups[to_id] = unsorted_artificial_groups[from_id]
+
+  for pol_name, group_ids in unsorted_task_groups.items():
+    sorted_task_groups[pol_name] = sorted([translation[gid] for gid in group_ids])
+
+  return (sorted_task_groups, sorted_artificial_groups)
