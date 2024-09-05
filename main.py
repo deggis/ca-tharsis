@@ -23,7 +23,7 @@ except ImportError:
 
 import pandas as pd
 
-from disjoint_sets import split_to_disjoint_sets, GroupMembers
+from disjoint_sets import split_to_disjoint_sets_ordered, GroupMembers
 from collections import namedtuple
 from common_apps import common_apps
 
@@ -393,7 +393,7 @@ def create_policymodels(args, user_selection):
 
   users_task = [GroupMembers(name=policy_id, members=members)
       for policy_id, members in policy_user_memberships.items()]
-  policy_user_groups, dja_user_groups = split_to_disjoint_sets(users_task)
+  policy_user_groups, dja_user_groups = split_to_disjoint_sets_ordered(users_task)
 
   # Applications
   all_apps = get_all_referenced_apps(args)
@@ -402,7 +402,7 @@ def create_policymodels(args, user_selection):
   policy_app_memberships = resolve_apps_for_policy_objects(args, all_apps)
   apps_task = [GroupMembers(name=policy_id, members=members)
       for policy_id, members in policy_app_memberships.items()]
-  policy_app_groups, dja_app_groups = split_to_disjoint_sets(apps_task)
+  policy_app_groups, dja_app_groups = split_to_disjoint_sets_ordered(apps_task)
 
   seen_grant_controls = set()
   seen_session_controls = set()
