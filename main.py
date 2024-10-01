@@ -27,6 +27,17 @@ from disjoint_sets import split_to_disjoint_sets_ordered, GroupMembers
 from collections import namedtuple
 from common_apps import common_apps
 
+UserTargetingDefinition = namedtuple('UserTargetingDefinition', [
+  'included_users',
+  'included_groups',
+  'included_roles',
+  'includeGuestsOrExternalUsers',
+  'excluded_users',
+  'excluded_groups',
+  'excluded_roles',
+  'excludeGuestsOrExternalUsers'
+])
+
 
 PolicyModel = namedtuple('PolicyModel', [
   'id',
@@ -34,6 +45,7 @@ PolicyModel = namedtuple('PolicyModel', [
   'name',
   'members',
   'enabled',
+  'targeting_definition',
   # Conditions
   'condition_usergroups',
   'condition_applications',
@@ -385,6 +397,30 @@ def translate_session_controls(session_control_list):
   return session_controls
 
 
+def create_targeting_definition(args, ca_policy) -> UserTargetingDefinition:
+  udef = ca_policy['conditions']['users']
+
+  users_by_ids = get_all_members(args)
+
+  def get_user_upns(udef):
+    if udef == ['All']:
+      uids = users_by_ids.keys()
+    else:
+      uids = udef
+    return [users_by_ids[uid]['userPrincipalName'] for uid in uids]
+
+  j = UserTargetingDefinition(
+    included_users=get_user_upns(udef['includeUsers']),
+    included_groups=udef['includeGroups'],
+    included_roles=udef['includeRoles'],
+    includeGuestsOrExternalUsers=udef['includeGuestsOrExternalUsers'],
+    excluded_users=get_user_upns(udef['excludeUsers']),
+    excluded_groups=udef['excludeGroups'],
+    excluded_roles=udef['excludeRoles'],
+    excludeGuestsOrExternalUsers=udef['excludeGuestsOrExternalUsers'],
+  )
+  return j
+
 
 def create_policymodels(args, user_selection):
   # Users
@@ -453,10 +489,13 @@ def create_policymodels(args, user_selection):
     signin_risk_levels = set(conditions['signInRiskLevels'])
     user_risk_levels = set(conditions['userRiskLevels'])
 
+    targeting_definition = create_targeting_definition(args, ca_policy)
+
     policyModels.append(PolicyModel(
       id=policy_id,
       name=ca_policy['displayName'],
       enabled=enabled,
+      targeting_definition=targeting_definition,
       members=policy_user_memberships[policy_id],
       condition_usergroups=policy_user_groups[policy_id],
       condition_applications=policy_app_groups[policy_id],
@@ -513,13 +552,17 @@ mk_html5_doc = lambda title, body_content: """
   </body>
 """ % (title, title, body_content)
 
-def get_all_members(args):
-  with open(mk_all_users_path(args)) as in_f:
+@cache
+def _get_all_members(users_path):
+  with open(users_path) as in_f:
     data = json.load(in_f)
   result = {}
   for item in data['value']:
     result[item['id']] = item
   return result
+
+def get_all_members(args):
+  return _get_all_members(mk_all_users_path(args))
 
 def create_additional_section(args, policyModels, generalInfo:GeneralInfo):
   users_by_ids = get_all_members(args)
