@@ -82,6 +82,8 @@ def resolve_memberships_with_query(args):
           groups.add(assignment['principalId'])
         elif assigned_object_type == '#microsoft.graph.user':
           pass
+        elif assigned_object_type == '#microsoft.graph.servicePrincipal':
+          pass
         else:
           raise Exception('Unknown referenced principal type: %s' % assigned_object_type)
 
@@ -107,6 +109,8 @@ def resolve_memberships_with_query(args):
         for member in get_members(mk_group_result_path(args, assignment['principalId'])):
           principals.append({'principalId': member})
       elif assigned_object_type == '#microsoft.graph.user':
+        principals.append({'principalId': assignment['principalId']})
+      elif assigned_object_type == '#microsoft.graph.servicePrincipal':
         principals.append({'principalId': assignment['principalId']})
       else:
         raise Exception('Unknown referenced principal type: %s' % assigned_object_type)
