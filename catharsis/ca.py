@@ -1,12 +1,12 @@
 from functools import cache
 import json
-from common_apps import common_apps
-from disjoint_sets import GroupMembers, split_to_disjoint_sets_ordered
-from typedefs import GeneralInfo, PolicyModel, UserTargetingDefinition
+from catharsis.common_apps import common_apps
+from catharsis.disjoint_sets import GroupMembers, split_to_disjoint_sets_ordered
+from catharsis.typedefs import GeneralInfo, PolicyModel, UserTargetingDefinition
 
 
-from utils import get_all_members, get_members
-from settings import ALL_CLIENT_APP_TYPES, META_APP_ALL_UNMETIONED_APPS, MICROSOFT_ADMIN_PORTALS_APP, mk_ca_path, mk_role_result_resolved_path, mk_group_result_path
+from catharsis.utils import get_all_members, get_members
+from catharsis.settings import ALL_CLIENT_APP_TYPES, META_APP_ALL_UNMETIONED_APPS, MICROSOFT_ADMIN_PORTALS_APP, mk_ca_path, mk_role_result_resolved_path, mk_group_result_path
 
 
 

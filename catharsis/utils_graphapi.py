@@ -2,9 +2,9 @@ import json
 from os import path as os_path
 from os import remove as os_remove
 
-from ca import list_referred_groups_roles
-from utils import get_members, run_cmd
-from settings import mk_ca_path, mk_role_result_raw_path, mk_group_result_path, mk_role_result_resolved_path, mk_all_users_path
+from catharsis.ca import list_referred_groups_roles
+from catharsis.utils import get_members, run_cmd
+from catharsis.settings import mk_ca_path, mk_role_result_raw_path, mk_group_result_path, mk_role_result_resolved_path, mk_all_users_path
 
 def _run_graph_user_query(args, result_path, initial_url):
   temp_file = result_path+'_temp'

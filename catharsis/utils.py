@@ -3,9 +3,9 @@ import json
 import math
 import subprocess
 
-from common_apps import common_apps
+from catharsis.common_apps import common_apps
 
-from settings import mk_all_users_path
+from catharsis.settings import mk_all_users_path
 
 
 def count_s(a, b):

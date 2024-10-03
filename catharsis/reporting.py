@@ -4,10 +4,10 @@ import json
 from typing import List
 
 import pandas as pd
-from typedefs import GeneralInfo, PolicyModel
+from catharsis.typedefs import GeneralInfo, PolicyModel
 
-from utils import get_all_members
-from settings import mk_all_users_path, mk_report_csv_path, mk_report_ca_coverage_path, mk_solutions_report_path
+from catharsis.utils import get_all_members
+from catharsis.settings import mk_all_users_path, mk_report_csv_path, mk_report_ca_coverage_path, mk_solutions_report_path
 
 
 mk_html5_doc = lambda title, body_content: """

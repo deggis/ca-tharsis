@@ -1,7 +1,7 @@
 import json
 from os import path as os_path
-from settings import mk_users_licenses, mk_all_users_path
-from utils import get_members, run_cmd
+from catharsis.settings import mk_users_licenses, mk_all_users_path
+from catharsis.utils import get_members, run_cmd
 
 
 def get_licenses(args):

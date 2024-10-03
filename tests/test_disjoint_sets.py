@@ -1,5 +1,5 @@
 import unittest
-from disjoint_sets import *
+from catharsis.disjoint_sets import *
 
 class TestStringMethods(unittest.TestCase):
 
