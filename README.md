@@ -193,3 +193,9 @@ IV2 == 0
 - what-if tool: https://learn.microsoft.com/en-us/entra/identity/conditional-access/what-if-tool
 - Conditional access workbook: https://learn.microsoft.com/en-us/entra/identity/monitoring-health/workbook-conditional-access-gap-analyzer
 - Signin logs/panel
+
+
+# Security considerations
+
+- Path injection: Azure resource id's (GUIDs, some names) are used as part of local file names. Azure does not allow special characters in these fields.
+  - TODO: still, sanitize these anyway

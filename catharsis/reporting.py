@@ -13,25 +13,9 @@ from catharsis.settings import mk_all_users_path, mk_report_csv_path, mk_report_
 mk_html5_doc = lambda title, body_content: """
 <html>
   <head>
-    <style type="text/css">
-      .mystyle {
-        font-size: 11pt; 
-        font-family: Arial;
-        border-collapse: collapse; 
-        border: 1px solid silver;
-      }
-      .mystyle td, th {
-        padding: 5px;
-      }
-      .mystyle tr:nth-child(even) {
-        background: #E0E0E0;
-      }
-      .mystyle tr:hover {
-        background: silver;
-        cursor: pointer;
-      }
-    </style>
+    <link rel="stylesheet" href="style.css" />
     <title>%s</title>
+    <script src="app.js"></script>
   </head>
 
   <body>
@@ -43,12 +27,17 @@ mk_html5_doc = lambda title, body_content: """
 
 def create_additional_section(args, policyModels, generalInfo:GeneralInfo):
   users_by_ids = get_all_members(args)
+  def get_user_string(uid):
+    if uid in users_by_ids:
+      return users_by_ids[uid]['userPrincipalName']
+    else:
+      return uid
 
   s = '<ul>'
   s += '<li>Total users in section: %s</li>' % generalInfo.users_count
   for ug_id, user_ids in generalInfo.disjoint_artificial_user_groups.items():
     example_user = sorted(list(user_ids))[0]
-    s += '<li>User group %d: Users: %d. Example user: %s</li>' % (ug_id, len(user_ids), users_by_ids[example_user]['userPrincipalName'])
+    s += '<li>User group %d: Users: %d. Example user: %s</li>' % (ug_id, len(user_ids), get_user_string(example_user))
   s += '</ul>'
   return s
 
@@ -56,43 +45,159 @@ def create_additional_section(args, policyModels, generalInfo:GeneralInfo):
 def create_report_section(args, policyModels:List[PolicyModel], generalInfo:GeneralInfo, title):
   pms = sorted(policyModels, key=lambda x: (not x.enabled, x.name))
 
+  col_groups: List[dict] = []
   d = {
      'Name': [p.name for p in pms],
      'On': [str(p.enabled) for p in pms],
      'Users': [len(p.members) for p in pms]
   }
+  col_groups.append({
+    'name': 'Basic info',
+    'span': 4,
+    'columns': ['Row', 'Name', 'On', 'Users'],
+    'class': 'basicinfo'
+  })
   def x(b):
     return 'X' if b else ''
 
+  ug_counts = {}
+  ugs = []
   for ug, members in generalInfo.disjoint_artificial_user_groups.items():
     u_count = len(members)
-    d['UG%s/ %d' % (ug, u_count)] = [x(ug in p.condition_usergroups) for p in pms]
+    ug_col_name = 'UG%s' % ug
+    #d['UG%s/ %d' % (ug, u_count)] = [x(ug in p.condition_usergroups) for p in pms]
+    d[ug_col_name] = [x(ug in p.condition_usergroups) for p in pms]
+    ugs.append(ug_col_name)
+    ug_counts[ug_col_name] = u_count
+  col_groups.append({
+    'name': 'UGs',
+    'span': len(ugs),
+    'columns': ugs,
+    'class': 'ugs'
+  })
 
+  ags = []
   for ag, apps in generalInfo.disjoint_artificial_app_groups.items():
     if len(apps) == 1:
       ag_id = 'AG%s %s' % (ag, list(apps)[0])
     else:
       ag_id = 'AG%s (%d apps)' % (ag, len(apps))
     d[ag_id] = [x(ag in p.condition_applications) for p in pms]
+    ags.append(ag_id)
+  if ags:
+    col_groups.append({
+      'name': 'AGs',
+      'span': len(ags),
+      'columns': ags,
+      'class': 'ags'
+    })
 
+  actions = []
   for action in sorted(list(generalInfo.seen_app_user_actions)):
-    d['Action: %s' % action] = [x(action in p.condition_application_user_action) for p in pms]
+    action_name = 'Action: %s' % action
+    d[action_name] = [x(action in p.condition_application_user_action) for p in pms]
+    actions.append(action_name)
+  if actions:
+    col_groups.append({
+      'name': 'User actions',
+      'span': len(actions),
+      'columns': actions,
+      'class': 'useractions'
+    })
 
-  d['C:operator'] = [p.grant_operator for p in pms]
-
+  grant_controls = ['Operator']
   for control in sorted(list(generalInfo.seen_grant_controls)):
-    d['GC:%s' % control] = [x(control in p.grant_controls) for p in pms]
+    grant_control_name = 'GC:%s' % control
+    d[grant_control_name] = [x(control in p.grant_controls) for p in pms]
+    grant_controls.append(grant_control_name)
+  if grant_controls:
+    d['Operator'] = [(p.grant_operator or '') for p in pms]
+    col_groups.append({
+      'name': 'GrantControls',
+      'span': len(grant_controls),
+      'columns': grant_controls,
+      'class': 'grantcontrols'
+    })
 
+  session_controls = []
   for control in sorted(list(generalInfo.seen_session_controls)):
-    d['SC:%s' % control] = [x(control in p.session_controls) for p in pms]
+    session_control_name = 'SC:%s' % control
+    d[session_control_name] = [x(control in p.session_controls) for p in pms]
+    session_controls.append(session_control_name)
+  if session_controls:
+    col_groups.append({
+      'name': 'SessionControls',
+      'span': len(session_controls),
+      'columns': session_controls,
+      'class': 'sessioncontrols'
+    })
 
-  df = pd.DataFrame(data=d)
+  # df = pd.DataFrame(data=d)
 
   additional = create_additional_section(args, policyModels, generalInfo)
 
   body_part = ''
   body_part += f'<h2>{title}</h2>'
-  body_part += df.to_html(classes='mystyle')
+  #body_part += df.to_html(classes='mystyle')
+  
+  body_part += '<table class="catable">'
+  body_part += f'<caption>{title}</caption>'
+  body_part += '<colgroup>'
+  for cg_data in col_groups:
+    span = cg_data['span']
+    cls = cg_data['class']
+    body_part += f'<col span="{span}" columnname="{cls}" class="{cls} colgroup-large" />'
+    body_part += f'<col span="1" columnname="{cls}" class="{cls} colgroup-min" />'
+  body_part += '</colgroup>' 
+
+  # Zero row: column group names
+  body_part += '<tr>' 
+  for cg_data in col_groups:
+      span = cg_data['span']
+      cls = cg_data['class']
+      name = cg_data['name']
+      body_part += f'<th colspan="{span}" class="col-group {cls}"><a columname="{cls}" class="col-closeaction {cls}">{name}</a></th>'
+      body_part += f'<th class="col-group-minified {cls}"><a columname="{cls}" class="col-openaction {cls}">{name} (show)</a></th>'
+  body_part += '</tr>' 
+
+  # First row: columns, group names
+  body_part += '<tr>' 
+  for cg_data in col_groups:
+      span = cg_data['span']
+      cls = cg_data['class']
+      for col in cg_data['columns']:
+        body_part += f'<th class="col-{col} {cls} subtitle">{col}</th>'
+      body_part += f'<th></th>'
+  body_part += '</tr>' 
+
+  # 2nd row: counts
+  body_part += '<tr>' 
+  for cg_data in col_groups:
+    for col in cg_data['columns']:
+      count = ''
+      if col.startswith('UG'):
+        count = '%d' % ug_counts[col]
+      body_part += f'<th>{count}</th>'
+    body_part += f'<td>.</td>' # minified column
+  body_part += '</tr>'
+
+  # Policy rows
+  for i, p in enumerate(pms):
+    body_part += '<tr>'
+    for cg_data in col_groups:
+      for col_name in cg_data['columns']:
+        if col_name in d:
+          content = d[col_name][i]
+        elif col_name == 'Row':
+          content = '%d' % (i+1)
+        else:
+          content = '?'
+        body_part += f'<td>{content}</td>'
+      body_part += f'<td>.</td>' # minified column
+    body_part += '</tr>'
+
+  body_part += '</table>'
+
   body_part += additional
 
 
@@ -112,11 +217,11 @@ def create_report_section(args, policyModels:List[PolicyModel], generalInfo:Gene
       writer = csv.DictWriter(out_f, fieldnames=fieldnames, dialect=csv.excel)
       writer.writeheader()
       for member in members:
-        user = user_data[member]
+        user = user_data.get(member, {})
         writer.writerow({
-          'id': user['id'],
-          'upn': user['userPrincipalName'],
-          'accountEnabled': user['accountEnabled'],
+          'id': user.get('id', ''),
+          'upn': user.get('userPrincipalName', ''),
+          'accountEnabled': user.get('accountEnabled', ''),
           'roles': ''
         })
     

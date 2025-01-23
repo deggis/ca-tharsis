@@ -3,6 +3,7 @@ from os import path as os_path
 from os import remove as os_remove
 
 from catharsis.ca import list_referred_groups_roles
+from catharsis.typedefs import RunConf
 from catharsis.utils import get_members, run_cmd
 from catharsis.settings import mk_ca_path, mk_role_result_raw_path, mk_group_result_path, mk_role_result_resolved_path, mk_all_users_path
 
@@ -60,6 +61,12 @@ def fetch_ca_policy(args):
     print('Fetching CA policy')
     run_cmd(f'az rest --uri "https://graph.microsoft.com/beta/identity/conditionalAccess/policies" > {result_file}')
 
+def fetch_group_members(args: RunConf, group_id: str):
+    group_result_file = mk_group_result_path(args, group_id)
+    if not os_path.exists(group_result_file):
+        group_url = f'https://graph.microsoft.com/v1.0/groups/{group_id}/transitiveMembers'
+        _run_graph_user_query(args, group_result_file, group_url)
+
 def resolve_memberships_with_query(args):
   groups, roles = list_referred_groups_roles(args)
 
@@ -88,10 +95,7 @@ def resolve_memberships_with_query(args):
           raise Exception('Unknown referenced principal type: %s' % assigned_object_type)
 
   for group_id in groups:
-    group_result_file = mk_group_result_path(args, group_id)
-    if not os_path.exists(group_result_file):
-      group_url = f'https://graph.microsoft.com/v1.0/groups/{group_id}/transitiveMembers'
-      _run_graph_user_query(args, group_result_file, group_url)
+    fetch_group_members(args, group_id)
 
   for role_id in roles:
     role_resolved_result_fn = mk_role_result_resolved_path(args, role_id)

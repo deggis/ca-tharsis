@@ -8,7 +8,7 @@ from catharsis.licenses import get_licenses
 from catharsis.reporting import create_report_section, mk_html5_doc
 from catharsis.settings import catharsis_parser, mk_all_users_path, mk_summary_report_path
 from catharsis.solver import translate_policymodels_to_task
-from catharsis.utils import count_s, get_members
+from catharsis.utils import count_s, get_members, ensure_workdir
 from catharsis.utils_graphapi import fetch_all_users, fetch_ca_policy, resolve_memberships_with_query
 
 solver_imports_available = True
@@ -36,8 +36,7 @@ def main():
   if args.use_solver and not solver_imports_available:
     raise Exception("cpmpy related libraries are not available!")
 
-  if not os.path.exists(args.work_dir):
-    os.makedirs(args.work_dir)
+  ensure_workdir(args)
   fetch_ca_policy(args)
   resolve_memberships_with_query(args)
   fetch_all_users(args)

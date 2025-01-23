@@ -17,6 +17,7 @@ mk_group_result_path = lambda args, group_id: os_path.join(args.work_dir, f'grou
 mk_role_result_raw_path = lambda args, role_id: os_path.join(args.work_dir, f'role_{role_id}_raw.json')
 mk_role_result_resolved_path = lambda args, role_id: os_path.join(args.work_dir, f'role_{role_id}_resolved.json')
 mk_all_users_path = lambda args: os_path.join(args.work_dir, 'all_users.json')
+mk_all_service_principals_path = lambda args: os_path.join(args.work_dir, 'all_service_principals.json')  # az_ad_sp_list --all
 mk_users_licenses = lambda args: os_path.join(args.work_dir, 'licenses.json')
 mk_summary_report_path = lambda args: os_path.join(args.work_dir, 'summary_of_ca.html')
 mk_report_csv_path = lambda args, report, ug_name: os_path.join(args.work_dir, f'report_{report}_group_{ug_name}_members.csv')

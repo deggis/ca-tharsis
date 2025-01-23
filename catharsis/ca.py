@@ -65,7 +65,14 @@ def create_targeting_definition(args, ca_policy) -> UserTargetingDefinition:
       uids = users_by_ids.keys()
     else:
       uids = udef
-    return [users_by_ids[uid]['userPrincipalName'] for uid in uids]
+    result = []
+    for uid in uids:
+      hit = users_by_ids.get(uid)
+      if hit:
+        result.append(hit['userPrincipalName'])
+      else:
+        result.append('Principal removed? %s' % uid)
+    return result
 
   j = UserTargetingDefinition(
     included_users=get_user_upns(udef['includeUsers']),
@@ -190,7 +197,9 @@ def create_policymodels(args, user_selection):
       grant_operator = ca_grant_controls['operator']
       grant_controls = ca_grant_controls['builtInControls']
       seen_grant_controls.update(grant_controls)
-   
+    else:
+      grant_controls = []
+
     authenticationStrength = None
     if ca_grant_controls:
       if strength := ca_grant_controls.get('authenticationStrength'):
