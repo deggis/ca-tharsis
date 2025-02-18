@@ -1,7 +1,7 @@
 from typing import List, Tuple
 from functools import cache
 import json
-from catharsis.cached_get import get_raw_policy_defs
+from catharsis.cached_get import get_raw_policy_defs, mk_role_result_resolved_path, mk_group_result_path
 from catharsis.common_apps import common_apps
 from catharsis.disjoint_sets import GroupMembers, split_to_disjoint_sets_ordered
 from catharsis.typedefs import GeneralInfo, PolicyModel, UserTargetingDefinition

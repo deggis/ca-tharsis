@@ -9,6 +9,7 @@ from catharsis.reporting import create_report_section, mk_html5_doc
 from catharsis.settings import catharsis_parser, mk_summary_report_path
 from catharsis.solver import translate_policymodels_to_task
 from catharsis.utils import count_s, get_members, ensure_cache_and_workdir, fetch_all_users_azcli, fetch_ca_policy_azcli, resolve_memberships_with_query, resolve_memberships_with_query
+from catharsis.cached_get import mk_all_users_path
 
 solver_imports_available = True
 try:
