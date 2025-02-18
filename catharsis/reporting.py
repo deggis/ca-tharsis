@@ -6,8 +6,8 @@ from typing import List
 import pandas as pd
 from catharsis.typedefs import GeneralInfo, PolicyModel
 
-from catharsis.utils import get_all_members
-from catharsis.settings import mk_all_users_path, mk_report_csv_path, mk_report_ca_coverage_path, mk_solutions_report_path
+from catharsis.utils import get_all_prefetched_members
+from catharsis.settings import mk_report_csv_path, mk_report_ca_coverage_path, mk_solutions_report_path
 
 
 mk_html5_doc = lambda title, body_content: """
@@ -26,7 +26,7 @@ mk_html5_doc = lambda title, body_content: """
 
 
 def create_additional_section(args, policyModels, generalInfo:GeneralInfo):
-  users_by_ids = get_all_members(args)
+  users_by_ids = get_all_prefetched_members(args)
   def get_user_string(uid):
     if uid in users_by_ids:
       return users_by_ids[uid]['userPrincipalName']

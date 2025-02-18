@@ -1,12 +1,13 @@
+from typing import List, Tuple
 from functools import cache
 import json
+from catharsis.cached_get import get_raw_policy_defs
 from catharsis.common_apps import common_apps
 from catharsis.disjoint_sets import GroupMembers, split_to_disjoint_sets_ordered
 from catharsis.typedefs import GeneralInfo, PolicyModel, UserTargetingDefinition
 
-
-from catharsis.utils import get_all_members, get_members
-from catharsis.settings import ALL_CLIENT_APP_TYPES, META_APP_ALL_UNMETIONED_APPS, MICROSOFT_ADMIN_PORTALS_APP, mk_ca_path, mk_role_result_resolved_path, mk_group_result_path
+from catharsis.utils import get_all_prefetched_members, get_members
+from catharsis.settings import ALL_CLIENT_APP_TYPES, META_APP_ALL_UNMETIONED_APPS, MICROSOFT_ADMIN_PORTALS_APP
 
 
 
@@ -18,34 +19,13 @@ def translate_app_guid(app_id):
   else:
     return app_id
 
-def get_policy_defs(args):
-  with open(mk_ca_path(args)) as in_f:
-    ca = json.load(in_f)
-    policy_objects = ca['value']
-    if args.include_report_only:
-      return policy_objects
-    else:
-      return [p for p in policy_objects if p['state'] == 'enabled']
-
-
-def list_referred_groups_roles(args):
-  groups, roles = [], []
-  for ca_policy in get_policy_defs(args):
-    user_targeting = ca_policy['conditions']['users']
-    groups.extend(user_targeting.get('includeGroups', []))
-    roles.extend(user_targeting.get('includeRoles', []))
-    groups.extend(user_targeting.get('excludeGroups', []))
-    roles.extend(user_targeting.get('excludeRoles', []))
-    # TODO: include/excludeGuestsOrExternalUsers missing
-
-  return set(groups), set(roles)
 
 def get_translated_app_conds(conds, key):
   return set([translate_app_guid(aid) for aid in conds[key] if aid not in ['All', 'None']])
 
 def get_all_referenced_apps(args):
   apps = set()
-  for ca_policy in get_policy_defs(args):
+  for ca_policy in get_raw_policy_defs(args):
     app_conds = ca_policy['conditions']['applications']
     apps.update(get_translated_app_conds(app_conds, 'excludeApplications'))
     apps.update(get_translated_app_conds(app_conds, 'includeApplications'))
@@ -58,7 +38,7 @@ def get_all_referenced_apps(args):
 def create_targeting_definition(args, ca_policy) -> UserTargetingDefinition:
   udef = ca_policy['conditions']['users']
 
-  users_by_ids = get_all_members(args)
+  users_by_ids = get_all_prefetched_members(args)
 
   def get_user_upns(udef):
     if udef == ['All']:
@@ -86,13 +66,11 @@ def create_targeting_definition(args, ca_policy) -> UserTargetingDefinition:
   )
   return j
 
-
-
 def resolve_members_for_policy_objects(args, user_selection):
   # policy_id guid: set of user guids (lowercase)
   memberships = {}
 
-  for ca_policy in get_policy_defs(args):
+  for ca_policy in get_raw_policy_defs(args):
     user_targeting = ca_policy['conditions']['users']
     included = set()
     if user_targeting['includeUsers'] == ['All']:
@@ -130,7 +108,7 @@ def resolve_members_for_policy_objects(args, user_selection):
 def resolve_apps_for_policy_objects(args, all_apps):
   memberships = {}
 
-  for ca_policy in get_policy_defs(args):
+  for ca_policy in get_raw_policy_defs(args):
     app_conds = ca_policy['conditions']['applications']
     included = set()
     if app_conds['includeApplications'] == ['All']:
@@ -157,7 +135,7 @@ def translate_session_controls(session_control_list):
   return session_controls
 
 
-def create_policymodels(args, user_selection):
+def create_policymodels(args, user_selection) -> Tuple[List[PolicyModel], GeneralInfo]:
   # Users
   policy_user_memberships = resolve_members_for_policy_objects(args, user_selection)
   policy_user_memberships['all_meta'] = user_selection.copy()
@@ -181,7 +159,7 @@ def create_policymodels(args, user_selection):
 
   # Create models
   policyModels = []
-  for ca_policy in get_policy_defs(args):
+  for ca_policy in get_raw_policy_defs(args):
     enabled = ca_policy['state'] == 'enabled'
     policy_id = ca_policy['id']
 

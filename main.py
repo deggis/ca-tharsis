@@ -6,10 +6,9 @@ from enum import Enum, auto
 from catharsis.ca import create_policymodels
 from catharsis.licenses import get_licenses
 from catharsis.reporting import create_report_section, mk_html5_doc
-from catharsis.settings import catharsis_parser, mk_all_users_path, mk_summary_report_path
+from catharsis.settings import catharsis_parser, mk_summary_report_path
 from catharsis.solver import translate_policymodels_to_task
-from catharsis.utils import count_s, get_members, ensure_workdir
-from catharsis.utils_graphapi import fetch_all_users, fetch_ca_policy, resolve_memberships_with_query
+from catharsis.utils import count_s, get_members, ensure_cache_and_workdir, fetch_all_users_azcli, fetch_ca_policy_azcli, resolve_memberships_with_query, resolve_memberships_with_query
 
 solver_imports_available = True
 try:
@@ -19,12 +18,6 @@ except ImportError:
   cp = None
   OrtSolutionPrinter = None
   solver_imports_available = False
-
-
-# Conditional Access Constraint Solver for Gaps
-# CACSFG
-
-
 
 def display_warnings(args):
   # https://learn.microsoft.com/en-us/entra/identity/conditional-access/migrate-approved-client-app
@@ -36,33 +29,35 @@ def main():
   if args.use_solver and not solver_imports_available:
     raise Exception("cpmpy related libraries are not available!")
 
-  ensure_workdir(args)
-  fetch_ca_policy(args)
+  ensure_cache_and_workdir(args)
+  fetch_ca_policy_azcli(args)
   resolve_memberships_with_query(args)
-  fetch_all_users(args)
+  fetch_all_users_azcli(args)
   if args.get_licenses_from_graph:
     get_licenses(args)
 
-  body_content = ''
-  all_users = get_members(mk_all_users_path(args))
-  # create pre-model separately and translate it later to cpmpy
-  policy_models, generalInfo = create_policymodels(args, user_selection=all_users)
-  body_content += create_report_section(args, policy_models, generalInfo, 'All users')
+  if args.create_ca_summary:
 
-  users = get_members(mk_all_users_path(args), req_user_active=True)
-  policy_models, generalInfo = create_policymodels(args, user_selection=users)
-  body_content += create_report_section(args, policy_models, generalInfo, 'All active users (%s)' % count_s(len(users), len(all_users)))
+    body_content = ''
+    all_users = get_members(mk_all_users_path(args))
+    # create pre-model separately and translate it later to cpmpy
+    policy_models, generalInfo = create_policymodels(args, user_selection=all_users)
+    body_content += create_report_section(args, policy_models, generalInfo, 'All users')
 
-  users = get_members(mk_all_users_path(args), req_user_active=True, req_user_internal=True)
-  policy_models, generalInfo = create_policymodels(args, user_selection=users)
-  body_content += create_report_section(args, policy_models, generalInfo, 'All active & internal (%s)' % count_s(len(users), len(all_users)))
+    users = get_members(mk_all_users_path(args), req_user_active=True)
+    policy_models, generalInfo = create_policymodels(args, user_selection=users)
+    body_content += create_report_section(args, policy_models, generalInfo, 'All active users (%s)' % count_s(len(users), len(all_users)))
 
-  users = get_members(mk_all_users_path(args), req_user_active=True, req_user_guest=True)
-  policy_models, generalInfo = create_policymodels(args, user_selection=users)
-  body_content += create_report_section(args, policy_models, generalInfo, 'All active & guest (%s)' % count_s(len(users), len(all_users)))
+    users = get_members(mk_all_users_path(args), req_user_active=True, req_user_internal=True)
+    policy_models, generalInfo = create_policymodels(args, user_selection=users)
+    body_content += create_report_section(args, policy_models, generalInfo, 'All active & internal (%s)' % count_s(len(users), len(all_users)))
 
-  with open(mk_summary_report_path(args), 'w') as out_f:
-    out_f.write(mk_html5_doc('CA report', body_content))
+    users = get_members(mk_all_users_path(args), req_user_active=True, req_user_guest=True)
+    policy_models, generalInfo = create_policymodels(args, user_selection=users)
+    body_content += create_report_section(args, policy_models, generalInfo, 'All active & guest (%s)' % count_s(len(users), len(all_users)))
+
+    with open(mk_summary_report_path(args), 'w') as out_f:
+      out_f.write(mk_html5_doc('CA report', body_content))
 
   # create model
   if args.use_solver:

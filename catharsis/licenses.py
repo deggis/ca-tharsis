@@ -1,6 +1,5 @@
 import json
 from os import path as os_path
-from catharsis.settings import mk_users_licenses, mk_all_users_path
 from catharsis.utils import get_members, run_cmd
 
 
