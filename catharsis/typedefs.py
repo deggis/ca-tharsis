@@ -1,5 +1,6 @@
 from enum import Enum, auto
 from typing import List, Optional, TypeAlias, NamedTuple, Any
+import json
 import argparse
 
 RunConf: TypeAlias = argparse.Namespace
@@ -59,6 +60,8 @@ class PrincipalType(Enum):
   def __repr__(self) -> str:
     return str(self.value)
 
+from dataclasses import dataclass
+
 class ServicePrincipalType(Enum):
   # https://learn.microsoft.com/en-us/entra/identity-platform/app-objects-and-service-principals?tabs=browser#service-principal-object
   ManagedIdentity = 'ManagedIdentity'
@@ -69,23 +72,71 @@ class ServicePrincipalType(Enum):
   SocialIdp = 'SocialIdp'
   Unknown = 'Unknown'
 
-class ServicePrincipalDetails(NamedTuple):
+@dataclass
+class ServicePrincipalDetails:
   servicePrincipalType: ServicePrincipalType
 
-class UserPrincipalDetails(NamedTuple):
+@dataclass
+class UserPrincipalDetails:
   upn: str   # User principal name
 
-class Principal(NamedTuple):
-  id: str                 # GUID
+@dataclass
+class Principal:
+  """
+  Saving the world by creating yet another representation
+  for an Entra ID principal. Cheers.
+  """
+  id: str                   # GUID
   displayName: str
   accountEnabled: bool
-  raw: dict               # Raw data
-  usertype: PrincipalType # User or SP
+  raw: Optional[dict]       # Raw data
+  usertype: PrincipalType   # User or SP
   spDetails: Optional[ServicePrincipalDetails] = None
   userDetails: Optional[UserPrincipalDetails] = None
 
   def __repr__(self) -> str:
     return principal_to_string(self)
+
+CATHARSIS_TYPE = 'C_TYPE'
+
+decoded_dataclasses = {
+  'Principal': Principal,
+  'UserPrincipalDetails': UserPrincipalDetails,
+  'ServicePrincipalDetails': ServicePrincipalDetails,
+}
+
+decoded_enums = {
+  'ServicePrincipalType': ServicePrincipalType,
+  'PrincipalType': PrincipalType
+}
+
+class CatharsisEncoder(json.JSONEncoder):
+  def default(self, obj):
+    r = None
+    typename = type(obj).__name__
+    if typename in decoded_enums:
+      r = {'value': obj.value}
+    if typename in decoded_dataclasses:
+      r = obj.__dict__.copy()
+    if r:
+      r[CATHARSIS_TYPE] = typename
+      return r
+    else:
+      return super().default(obj)
+
+
+def catharsis_decoder(obj):
+  if CATHARSIS_TYPE in obj:
+    catharsis_type = obj.pop(CATHARSIS_TYPE)
+    if catharsis_type in decoded_dataclasses:
+      cls = decoded_dataclasses[catharsis_type]
+      return cls(**obj)
+    elif catharsis_type in decoded_enums:
+      cls = decoded_enums[catharsis_type]
+      return cls(obj['value'])
+    else:
+      raise Exception('Cannot decode this type: %s' % catharsis_type)
+  return obj
 
 def principal_to_string(o: Principal) -> str:
   if o.usertype == PrincipalType.User:

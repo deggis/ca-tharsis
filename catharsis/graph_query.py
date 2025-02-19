@@ -1,16 +1,19 @@
 import subprocess
 import json
 import os
+from typing import List
 
 # Graph SDK stuff 
 
 from msgraph import GraphServiceClient
-from msgraph.generated.models.conditional_access_policy import ConditionalAccessPolicy
+from msgraph.generated.models.user import User as MSGUser
 from kiota_abstractions.native_response_handler import NativeResponseHandler
 from kiota_http.middleware.options import ResponseHandlerOption
+from azure.identity import AzureCliCredential
 
 from catharsis.typedefs import RunConf
-
+import catharsis.typedefs as CatharsisTypes
+import catharsis.cached_get as c
 
 # Deprecated 'Use graph sdk'
 def run_cmd(cmd_string, parse=False):
@@ -134,12 +137,13 @@ async def do_msgraph_sdk_graph_query(request_builder):
    # https://github.com/microsoftgraph/msgraph-sdk-python?tab=readme-ov-file#32-pagination
   result = []
 
-  response = await request_builder.members.get()
+  # members.get?
+  response = await request_builder.get()
   for o in response.value:
     result.append(o)
     
   while response is not None and response.odata_next_link is not None:
-    response = await request_builder.members.with_url(response.odata_next_link).get()
+    response = await request_builder.with_url(response.odata_next_link).get()
     for o in response.value:
       result.append(o)
   
@@ -175,3 +179,40 @@ def graph_api_stuff():
     - https://graph.microsoft.com/v1.0/users/{user_id}/licenseDetails
   """
   pass
+
+
+# Utils on top of fetchers
+
+async def get_ca_policy_defs(args: RunConf) -> dict:
+    """ Returns the original CA response """
+    key = c.mk_ca_path(args)
+    if cached := c.get_cached(key):
+        return cached
+    else:
+        result = await _get_msgraph_ca_policy_json(get_msgraph_client(args))
+        value = result['value']
+        c.set_cached(key, value)
+        return value
+
+def msgraph_user_to_principal(u: MSGUser) -> CatharsisTypes.Principal:
+   return CatharsisTypes.Principal(
+      id=u.id,
+      displayName=u.display_name,
+      accountEnabled=u.account_enabled,
+      raw={},
+      usertype=CatharsisTypes.PrincipalType.User,
+      userDetails=CatharsisTypes.UserPrincipalDetails(upn=u.user_principal_name)
+   )
+
+async def get_all_users(args: RunConf) -> List[CatharsisTypes.Principal]:
+    """ Returns the original CA response """
+    key = c.mk_all_users_path(args)
+    if cached := c.get_cached(key):
+        principals = [CatharsisTypes.Principal(**ud) for ud in cached]
+        return principals
+    else:
+        result = await _get_msgraph_all_users(get_msgraph_client(args))
+        # value = result['value']
+        principals: List[CatharsisTypes.Principal] = [msgraph_user_to_principal(u) for u in result]
+        c.set_cached(key, principals)
+        return principals

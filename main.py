@@ -2,14 +2,19 @@ from os.path import join as path_join
 import os
 from typing import List
 from enum import Enum, auto
+import asyncio
 
 from catharsis.ca import create_policymodels
 from catharsis.licenses import get_licenses
 from catharsis.reporting import create_report_section, mk_html5_doc
 from catharsis.settings import catharsis_parser, mk_summary_report_path
 from catharsis.solver import translate_policymodels_to_task
-from catharsis.utils import count_s, get_members, ensure_cache_and_workdir, fetch_all_users_azcli, fetch_ca_policy_azcli, resolve_memberships_with_query, resolve_memberships_with_query
+from catharsis.utils import count_s, get_members, ensure_cache_and_workdir, fetch_all_users_azcli, fetch_ca_policy_azcli, resolve_ca_memberships_with_query
 from catharsis.cached_get import mk_all_users_path
+from catharsis.graph_query import get_all_users
+from catharsis.typedefs import CatharsisEncoder, catharsis_decoder
+import json
+
 
 solver_imports_available = True
 try:
@@ -24,19 +29,25 @@ def display_warnings(args):
   # https://learn.microsoft.com/en-us/entra/identity/conditional-access/migrate-approved-client-app
   pass
 
-def main():
+async def main():
   args = catharsis_parser.parse_args()
 
   if args.use_solver and not solver_imports_available:
     raise Exception("cpmpy related libraries are not available!")
 
-  ensure_cache_and_workdir(args)
-  fetch_ca_policy_azcli(args)
-  resolve_memberships_with_query(args)
-  fetch_all_users_azcli(args)
-  if args.get_licenses_from_graph:
-    get_licenses(args)
+  if True:
+    import debugpy
+    # 5678 is the default attach port in the VS Code debug configurations. Unless a host and port are specified, host defaults to 127.0.0.1
+    debugpy.listen(5678)
+    print("Waiting for debugger attach")
+    debugpy.wait_for_client()
+    debugpy.breakpoint()
+    print('break on this line')
 
+  ensure_cache_and_workdir(args)
+  await get_all_users(args)
+  await resolve_ca_memberships_with_query(args)
+  
   if args.create_ca_summary:
 
     body_content = ''
@@ -67,4 +78,4 @@ def main():
   # display warnings
 
 if __name__ == '__main__':
-  main()
+  asyncio.run(main())

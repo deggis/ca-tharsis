@@ -5,7 +5,7 @@ import json
 import typing
 from functools import cache
 
-from catharsis.typedefs import PrincipalType, RunConf, Principal, ServicePrincipalDetails, ServicePrincipalType, UserPrincipalDetails
+from catharsis.typedefs import PrincipalType, RunConf, Principal, ServicePrincipalDetails, ServicePrincipalType, UserPrincipalDetails, CatharsisEncoder, catharsis_decoder
 
 
 
@@ -31,7 +31,7 @@ def get_cached(key: str) -> typing.Any:
         if os.path.exists(key):
             # Cache this
             with open(key) as in_f:
-                return json.load(in_f)
+                return json.load(in_f, object_hook=catharsis_decoder)
         return None
 
 def set_cached(key: str, value: typing.Any) -> typing.Any:
@@ -39,18 +39,11 @@ def set_cached(key: str, value: typing.Any) -> typing.Any:
         _IN_MEMORY_CACHE[key] = value
     else:
         with open(key, 'w') as out_f:
-            return json.dump(value, out_f)
+            return json.dump(value, out_f, cls=CatharsisEncoder)
 
 # Refactor me
 
-def get_raw_policy_defs(args: RunConf) -> dict:
-    """ Returns the original CA response """
-    if cached := get_cached(mk_ca_path(args)):
-        return cached['value']
-    else:
-        raw_value = get_msgraph_ca_policy_json(get_msgraph_client(args))
-        set_cached(mk_ca_path(args), raw_value)
-        return raw_value['value']
+
 
 
 

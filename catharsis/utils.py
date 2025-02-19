@@ -20,7 +20,7 @@ from os import path as os_path
 from os import remove as os_remove
 
 from catharsis.typedefs import RunConf
-
+import catharsis.graph_query as queries
 
 
 def count_s(a, b):
@@ -128,9 +128,10 @@ def get_role_azcli(args, role_key, role_id):
     _run_graph_user_query(args, role_key, role_url)
 
 
-def list_referred_groups_roles(args):
+async def list_ca_referred_groups_roles(args):
   groups, roles = [], []
-  for ca_policy in get_raw_policy_defs(args):
+  ca_defs = await queries.get_ca_policy_defs(args)
+  for ca_policy in ca_defs:
     user_targeting = ca_policy['conditions']['users']
     groups.extend(user_targeting.get('includeGroups', []))
     roles.extend(user_targeting.get('includeRoles', []))
@@ -141,8 +142,8 @@ def list_referred_groups_roles(args):
   return set(groups), set(roles)
 
 
-def resolve_memberships_with_query(args):
-  groups, roles = list_referred_groups_roles(args)
+async def resolve_ca_memberships_with_query(args):
+  groups, roles = await list_ca_referred_groups_roles(args)
 
   for role_id in roles:
     # Check raw role files

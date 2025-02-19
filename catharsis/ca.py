@@ -1,7 +1,7 @@
 from typing import List, Tuple
 from functools import cache
 import json
-from catharsis.cached_get import get_raw_policy_defs, mk_role_result_resolved_path, mk_group_result_path
+from catharsis.cached_get import mk_role_result_resolved_path, mk_group_result_path
 from catharsis.common_apps import common_apps
 from catharsis.disjoint_sets import GroupMembers, split_to_disjoint_sets_ordered
 from catharsis.typedefs import GeneralInfo, PolicyModel, UserTargetingDefinition
@@ -9,7 +9,7 @@ from catharsis.typedefs import GeneralInfo, PolicyModel, UserTargetingDefinition
 from catharsis.utils import get_all_prefetched_members, get_members
 from catharsis.settings import ALL_CLIENT_APP_TYPES, META_APP_ALL_UNMETIONED_APPS, MICROSOFT_ADMIN_PORTALS_APP
 
-
+import catharsis.graph_query as queries
 
 @cache
 def translate_app_guid(app_id):
@@ -23,9 +23,9 @@ def translate_app_guid(app_id):
 def get_translated_app_conds(conds, key):
   return set([translate_app_guid(aid) for aid in conds[key] if aid not in ['All', 'None']])
 
-def get_all_referenced_apps(args):
+async def get_all_referenced_apps(args, ca_defs):
   apps = set()
-  for ca_policy in get_raw_policy_defs(args):
+  for ca_policy in ca_defs:
     app_conds = ca_policy['conditions']['applications']
     apps.update(get_translated_app_conds(app_conds, 'excludeApplications'))
     apps.update(get_translated_app_conds(app_conds, 'includeApplications'))
@@ -66,10 +66,11 @@ def create_targeting_definition(args, ca_policy) -> UserTargetingDefinition:
   )
   return j
 
-def resolve_members_for_policy_objects(args, user_selection):
+async def resolve_members_for_policy_objects(args, user_selection):
   # policy_id guid: set of user guids (lowercase)
   memberships = {}
 
+  ca_defs = await queries.get_ca_policy_defs(args)
   for ca_policy in get_raw_policy_defs(args):
     user_targeting = ca_policy['conditions']['users']
     included = set()
@@ -105,10 +106,9 @@ def resolve_members_for_policy_objects(args, user_selection):
     
   return memberships
 
-def resolve_apps_for_policy_objects(args, all_apps):
+def resolve_apps_for_policy_objects(args, all_apps, ca_defs):
   memberships = {}
-
-  for ca_policy in get_raw_policy_defs(args):
+  for ca_policy in ca_defs:
     app_conds = ca_policy['conditions']['applications']
     included = set()
     if app_conds['includeApplications'] == ['All']:
@@ -135,7 +135,7 @@ def translate_session_controls(session_control_list):
   return session_controls
 
 
-def create_policymodels(args, user_selection) -> Tuple[List[PolicyModel], GeneralInfo]:
+async def create_policymodels(args, user_selection) -> Tuple[List[PolicyModel], GeneralInfo]:
   # Users
   policy_user_memberships = resolve_members_for_policy_objects(args, user_selection)
   policy_user_memberships['all_meta'] = user_selection.copy()
@@ -143,12 +143,14 @@ def create_policymodels(args, user_selection) -> Tuple[List[PolicyModel], Genera
   users_task = [GroupMembers(name=policy_id, members=members)
       for policy_id, members in policy_user_memberships.items()]
   policy_user_groups, dja_user_groups = split_to_disjoint_sets_ordered(users_task)
+  
+  ca_defs = await queries.get_ca_policy_defs(args)
 
   # Applications
-  all_apps = get_all_referenced_apps(args)
+  all_apps = get_all_referenced_apps(args, ca_defs)
   all_apps.add(META_APP_ALL_UNMETIONED_APPS)
   all_apps.add(MICROSOFT_ADMIN_PORTALS_APP)  # make sure this is in separately
-  policy_app_memberships = resolve_apps_for_policy_objects(args, all_apps)
+  policy_app_memberships = resolve_apps_for_policy_objects(args, all_apps, ca_defs)
   apps_task = [GroupMembers(name=policy_id, members=members)
       for policy_id, members in policy_app_memberships.items()]
   policy_app_groups, dja_app_groups = split_to_disjoint_sets_ordered(apps_task)
@@ -159,7 +161,7 @@ def create_policymodels(args, user_selection) -> Tuple[List[PolicyModel], Genera
 
   # Create models
   policyModels = []
-  for ca_policy in get_raw_policy_defs(args):
+  for ca_policy in ca_defs(args):
     enabled = ca_policy['state'] == 'enabled'
     policy_id = ca_policy['id']
 
