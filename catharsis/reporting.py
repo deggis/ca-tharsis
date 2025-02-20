@@ -4,9 +4,9 @@ import json
 from typing import List
 
 import pandas as pd
-from catharsis.typedefs import GeneralInfo, PolicyModel
+from catharsis.graph_query import get_all_principals
+from catharsis.typedefs import GeneralInfo, PolicyModel, principal_to_string
 
-from catharsis.utils import get_all_prefetched_members
 from catharsis.settings import mk_report_csv_path, mk_report_ca_coverage_path, mk_solutions_report_path
 from catharsis.cached_get import mk_all_users_path
 
@@ -25,24 +25,20 @@ mk_html5_doc = lambda title, body_content: """
 """ % (title, title, body_content)
 
 
-def create_additional_section(args, policyModels, generalInfo:GeneralInfo):
-  users_by_ids = get_all_prefetched_members(args)
-  def get_user_string(uid):
-    if uid in users_by_ids:
-      return users_by_ids[uid]['userPrincipalName']
-    else:
-      return uid
+async def create_additional_section(args, policyModels, generalInfo:GeneralInfo):
+  principals_by_uids = await get_all_principals(args)
 
   s = '<ul>'
   s += '<li>Total users in section: %s</li>' % generalInfo.users_count
-  for ug_id, user_ids in generalInfo.disjoint_artificial_user_groups.items():
-    example_user = sorted(list(user_ids))[0]
-    s += '<li>User group %d: Users: %d. Example user: %s</li>' % (ug_id, len(user_ids), get_user_string(example_user))
+  for ug_id, principal_ids in generalInfo.disjoint_artificial_user_groups.items():
+    example_principal_id = sorted(list(principal_ids))[0]
+    example_principal = principals_by_uids[example_principal_id]
+    s += '<li>User group %d: Users: %d. Example user: %s</li>' % (ug_id, len(principal_ids), principal_to_string(example_principal))
   s += '</ul>'
   return s
 
 
-def create_report_section(args, policyModels:List[PolicyModel], generalInfo:GeneralInfo, title):
+async def create_report_section(args, policyModels:List[PolicyModel], generalInfo:GeneralInfo, title):
   pms = sorted(policyModels, key=lambda x: (not x.enabled, x.name))
 
   col_groups: List[dict] = []
@@ -62,8 +58,8 @@ def create_report_section(args, policyModels:List[PolicyModel], generalInfo:Gene
 
   ug_counts = {}
   ugs = []
-  for ug, members in generalInfo.disjoint_artificial_user_groups.items():
-    u_count = len(members)
+  for ug, member_principal_ids in generalInfo.disjoint_artificial_user_groups.items():
+    u_count = len(member_principal_ids)
     ug_col_name = 'UG%s' % ug
     #d['UG%s/ %d' % (ug, u_count)] = [x(ug in p.condition_usergroups) for p in pms]
     d[ug_col_name] = [x(ug in p.condition_usergroups) for p in pms]
@@ -134,7 +130,7 @@ def create_report_section(args, policyModels:List[PolicyModel], generalInfo:Gene
 
   # df = pd.DataFrame(data=d)
 
-  additional = create_additional_section(args, policyModels, generalInfo)
+  additional = await create_additional_section(args, policyModels, generalInfo)
 
   body_part = ''
   body_part += f'<h2>{title}</h2>'
@@ -200,15 +196,11 @@ def create_report_section(args, policyModels:List[PolicyModel], generalInfo:Gene
 
   body_part += additional
 
-
   title_fn = title.replace(' ', '_').replace('&', '-')
 
-  with open(mk_all_users_path(args)) as in_f:
-    user_data = {}
-    for member in json.load(in_f)['value']:
-      user_data[member['id']] = member
+  principals = await get_all_principals(args)
 
-  for ug, members in generalInfo.disjoint_artificial_user_groups.items():
+  for ug, member_principal_ids in generalInfo.disjoint_artificial_user_groups.items():
     if '(' in title_fn:
       title_fn = title_fn[:title_fn.index('(')]
     fn = mk_report_csv_path(args, report=title_fn, ug_name='UG%s' % ug)
@@ -216,12 +208,12 @@ def create_report_section(args, policyModels:List[PolicyModel], generalInfo:Gene
       fieldnames = ['id', 'upn', 'accountEnabled', 'roles']
       writer = csv.DictWriter(out_f, fieldnames=fieldnames, dialect=csv.excel)
       writer.writeheader()
-      for member in members:
-        user = user_data.get(member, {})
+      for member_id in member_principal_ids:
+        principal = principals[member_id]
         writer.writerow({
-          'id': user.get('id', ''),
-          'upn': user.get('userPrincipalName', ''),
-          'accountEnabled': user.get('accountEnabled', ''),
+          'id': principal.id,
+          'upn': principal_to_string(principal),
+          'accountEnabled': str(principal.accountEnabled),
           'roles': ''
         })
     

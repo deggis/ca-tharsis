@@ -5,14 +5,14 @@ import math
 
 import os
 import sys
-from typing import List
+from typing import List, Iterable, Set
 
 from catharsis.common_apps import common_apps
 
 # from catharsis.settings import mk_all_users_path, mk_group_result_path, mk_all_service_principals_path
-from catharsis.typedefs import PrincipalType, RunConf, Principal, ServicePrincipalDetails, ServicePrincipalType, UserPrincipalDetails
+from catharsis.typedefs import PrincipalGuid, PrincipalType, RunConf, Principal, ServicePrincipalDetails, ServicePrincipalType, UserPrincipalDetails
 from catharsis.cached_get import *
-from catharsis.graph_query import _run_graph_user_query, run_cmd
+from catharsis.graph_query import _run_graph_user_query, get_group_transitive_members, get_role_transitive_members, run_cmd
 
 from azure.identity import AzureCliCredential
 
@@ -20,6 +20,7 @@ from os import path as os_path
 from os import remove as os_remove
 
 from catharsis.typedefs import RunConf
+import catharsis.typedefs as CT
 import catharsis.graph_query as queries
 
 
@@ -33,7 +34,7 @@ graph_user_types = {
    '#microsoft.graph.servicePrincipal': PrincipalType.ServicePrincipal,
 }
 
-def get_members(path, req_user_active=False, req_user_guest=False, req_user_internal=False):
+def get_members_azcli(path, req_user_active=False, req_user_guest=False, req_user_internal=False):
   def user_filter(u):
     if req_user_active and not u['accountEnabled']:
       return False
@@ -73,7 +74,7 @@ def ensure_cache_and_workdir(args: RunConf):
 
 
 def group_members(args: RunConf, group_id: str) -> List[Principal]:
-  path = mk_group_result_path(args, group_id)
+  path = mk_group_result_transitive_path(args, group_id)
   members: List[Principal] = []
   principals = get_principals(args)
 
@@ -113,8 +114,8 @@ def fetch_all_users_azcli(args):
   _run_graph_user_query(args, mk_all_users_path(args), 'https://graph.microsoft.com/beta/users?select=id,accountenabled,userPrincipalName')
 
 
-def fetch_group_members(args: RunConf, group_id: str):
-    group_result_file = mk_group_result_path(args, group_id)
+def fetch_group_members_azcli(args: RunConf, group_id: str):
+    group_result_file = mk_group_result_transitive_path(args, group_id)
     if not os_path.exists(group_result_file):
         group_url = f'https://graph.microsoft.com/v1.0/groups/{group_id}/transitiveMembers'
         _run_graph_user_query(args, group_result_file, group_url)
@@ -142,39 +143,36 @@ async def list_ca_referred_groups_roles(args):
   return set(groups), set(roles)
 
 
-async def resolve_ca_memberships_with_query(args):
+async def prefetch_ca_memberships_with_query(args):
   groups, roles = await list_ca_referred_groups_roles(args)
 
   for role_id in roles:
-    # Check raw role files
-    # Step 1: Get raw role assignment data
+    await get_role_transitive_members(args, role_id)
 
-    # role_key = path
-    role_key = mk_role_result_raw_path(args, role_id)
-    get_role_azcli(args, role_key, role_id)
+  for group_id in groups:
+    await get_group_transitive_members(args, group_id)
 
+async def unused(args):
+
+  for assignments in None:
     # Step 2: Check if role assignment references groups
-    content = get_cached(role_key)['value']
-    for assignment in content:
-      assigned_object_type = assignment['principal']['@odata.type']
-      if assigned_object_type == '#microsoft.graph.group':
-        groups.add(assignment['principalId'])
-      elif assigned_object_type == '#microsoft.graph.user':
+    for assignment in assignments:
+      if assignment.odata_type == '#microsoft.graph.group':
+        await get_group_transitive_members(args, assignment.principalId)
+        groups.add(assignment.principalId)
+      elif assignment.odata_type == '#microsoft.graph.user':
         pass
-      elif assigned_object_type == '#microsoft.graph.servicePrincipal':
+      elif assignment.odata_type == '#microsoft.graph.servicePrincipal':
         pass
       else:
         raise Exception('Unknown referenced principal type: %s' % assigned_object_type)
 
-  for group_id in groups:
-    fetch_group_members(args, group_id)
-
   for role_id in roles:
-    role_resolved_result_fn = mk_role_result_resolved_path(args, role_id)
+    role_resolved_result_fn = mk_role_result_transitive_path(args, role_id)
     if os_path.exists(role_resolved_result_fn):
       continue
   
-    role_raw_result_fn = mk_role_result_raw_path(args, role_id)
+    role_raw_result_fn = mk_role_assignment_raw_path(args, role_id)
     with open(role_raw_result_fn) as in_f:
       content = json.load(in_f)['value']
     principals = []
@@ -182,7 +180,7 @@ async def resolve_ca_memberships_with_query(args):
     for assignment in content:
       assigned_object_type = assignment['principal']['@odata.type']
       if assigned_object_type == '#microsoft.graph.group':
-        for member in get_members(mk_group_result_path(args, assignment['principalId'])):
+        for member in get_members_azcli(mk_group_result_transitive_path(args, assignment['principalId'])):
           principals.append({'principalId': member})
       elif assigned_object_type == '#microsoft.graph.user':
         principals.append({'principalId': assignment['principalId']})
@@ -196,4 +194,28 @@ async def resolve_ca_memberships_with_query(args):
       json.dump(resolved_result, out_f)
 
 
+def principal_to_principal_id(principal: CT.Principal) -> PrincipalGuid:
+  return principal.id
 
+def principals_to_id_set(principals: Iterable[CT.Principal]) -> Set[PrincipalGuid]:
+  return set([p.id for p in principals])
+
+def assignedmembers_to_id_set(members: Iterable[CT.AssignedMember]) -> Set[PrincipalGuid]:
+  return set([p.principalId for p in members])
+
+def principal_dict_to_id_set(principals: dict[str, CT.Principal]) -> Set[PrincipalGuid]:
+  return principals_to_id_set(principals.values())
+
+def is_principal_account_enabled(principal: CT.Principal):
+  return principal.accountEnabled
+
+def is_user_external(principal: CT.Principal):
+  assert principal.usertype == CT.PrincipalType.User  # Can't answer this for SPs
+  if principal.userDetails:
+    return '#EXT#@' in principal.userDetails.upn
+
+def filter_ca_defs(args, ca_defs):
+  if not args.include_report_only:
+    return [ca for ca in ca_defs if ca['state'] == 'enabled']
+  else:
+    return ca_defs

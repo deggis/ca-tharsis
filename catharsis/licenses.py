@@ -1,6 +1,6 @@
 import json
 from os import path as os_path
-from catharsis.utils import get_members, run_cmd
+from catharsis.utils import get_members_azcli, run_cmd
 
 
 def get_licenses(args):
@@ -21,7 +21,7 @@ def get_licenses(args):
     with open(users_licenses_path, 'w') as out_f:
       json.dump(users_licenses, out_f)
 
-  all_users = get_members(mk_all_users_path(args))
+  all_users = get_members_azcli(mk_all_users_path(args))
   fetched = 0
   c_users = len(all_users)
   for i, user_id in enumerate(all_users):

@@ -2,10 +2,15 @@ from enum import Enum, auto
 from typing import List, Optional, TypeAlias, NamedTuple, Any
 import json
 import argparse
+from dataclasses import dataclass
 
 RunConf: TypeAlias = argparse.Namespace
 
 from typing import TypeAlias, NamedTuple
+
+PrincipalGuid: TypeAlias = str
+PrincipalDisplayname: TypeAlias = str
+CAGuid: TypeAlias = str
 
 
 class AzureSub(NamedTuple):
@@ -14,11 +19,11 @@ class AzureSub(NamedTuple):
   raw: dict  # Original data
 
 class UserTargetingDefinition(NamedTuple):
-  included_users: List[str]
+  included_users: List[PrincipalDisplayname]
   included_groups: List[str]
   included_roles: List[str]
   includeGuestsOrExternalUsers: List[str]
-  excluded_users: List[str]
+  excluded_users: List[PrincipalDisplayname]
   excluded_groups: List[str]
   excluded_roles: List[str]
   excludeGuestsOrExternalUsers: List[str]
@@ -53,14 +58,27 @@ class GeneralInfo(NamedTuple):
   apps_count: Any
 
 class PrincipalType(Enum):
-  User = auto()
-  ServicePrincipal = auto()
-  Unknown = auto()
+  User = 'User'
+  ServicePrincipal = 'SP'
+  Device = 'Device'
+  Group = 'Group'
+  Unknown = 'Unknown'
 
   def __repr__(self) -> str:
     return str(self.value)
 
-from dataclasses import dataclass
+def map_odata_type_to_principaltype(odata_type: str):
+  if odata_type == '#microsoft.graph.user':
+    return PrincipalType.User
+  elif odata_type == '#microsoft.graph.group':
+    return PrincipalType.Group
+  elif odata_type == '#microsoft.graph.servicePrincipal':
+    return PrincipalType.ServicePrincipal
+  elif odata_type == '#microsoft.graph.device':
+    return PrincipalType.Device
+  else:
+    raise Exception('Unknown odata_type: %s' % odata_type)
+
 
 class ServicePrincipalType(Enum):
   # https://learn.microsoft.com/en-us/entra/identity-platform/app-objects-and-service-principals?tabs=browser#service-principal-object
@@ -72,9 +90,28 @@ class ServicePrincipalType(Enum):
   SocialIdp = 'SocialIdp'
   Unknown = 'Unknown'
 
+  def __repr__(self) -> str:
+    return str(self.value)
+
+"""
+@dataclass
+class RawRoleAssignment:
+  roleId: str
+  principalId: str
+  odata_type: str   # microsoft.graph.[user,group,servicePrincipal]
+"""
+
+@dataclass
+class AssignedMember:
+  principalId: str
+  principalType: PrincipalType   # microsoft.graph.[user,group,servicePrincipal]
+
+
 @dataclass
 class ServicePrincipalDetails:
   servicePrincipalType: ServicePrincipalType
+  resourceLocation: Optional[str]
+  verifiedPublisher: Optional[str]
 
 @dataclass
 class UserPrincipalDetails:
@@ -93,6 +130,7 @@ class Principal:
   usertype: PrincipalType   # User or SP
   spDetails: Optional[ServicePrincipalDetails] = None
   userDetails: Optional[UserPrincipalDetails] = None
+  # todo lastupdated timestamp
 
   def __repr__(self) -> str:
     return principal_to_string(self)
@@ -103,6 +141,7 @@ decoded_dataclasses = {
   'Principal': Principal,
   'UserPrincipalDetails': UserPrincipalDetails,
   'ServicePrincipalDetails': ServicePrincipalDetails,
+  'AssignedMember': AssignedMember
 }
 
 decoded_enums = {
@@ -112,15 +151,15 @@ decoded_enums = {
 
 class CatharsisEncoder(json.JSONEncoder):
   def default(self, obj):
-    r = None
+    result = None
     typename = type(obj).__name__
     if typename in decoded_enums:
-      r = {'value': obj.value}
-    if typename in decoded_dataclasses:
-      r = obj.__dict__.copy()
-    if r:
-      r[CATHARSIS_TYPE] = typename
-      return r
+      result = {'value': obj.value}
+    elif typename in decoded_dataclasses:
+      result = obj.__dict__.copy()
+    if result:
+      result[CATHARSIS_TYPE] = typename
+      return result
     else:
       return super().default(obj)
 
@@ -139,10 +178,10 @@ def catharsis_decoder(obj):
   return obj
 
 def principal_to_string(o: Principal) -> str:
-  if o.usertype == PrincipalType.User:
-    return f"User: {o.displayName}"
+  if o.usertype == PrincipalType.User and o.userDetails:
+    return f"User: {o.userDetails.upn}"
   elif o.usertype == PrincipalType.ServicePrincipal:
     spType = o.spDetails.servicePrincipalType.value if o.spDetails else '!'
     return f"SP/{spType}: {o.displayName}"
   else:
-    raise Exception('Unknown principal type')
+    return o.id

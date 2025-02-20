@@ -7,7 +7,9 @@ from functools import cache
 
 from catharsis.typedefs import PrincipalType, RunConf, Principal, ServicePrincipalDetails, ServicePrincipalType, UserPrincipalDetails, CatharsisEncoder, catharsis_decoder
 
-
+import logging
+logger = logging.getLogger('catharsis.cached_get')
+logger.setLevel(logging.INFO)
 
 # Common: get data with runconf, translated to catharsis-models
 
@@ -15,9 +17,9 @@ IN_MEM_CACHE_PREFIX = 'mem:'
 mk_path = lambda args: args.cache_dir or IN_MEM_CACHE_PREFIX
 
 mk_ca_path = lambda args: os_path.join(mk_path(args), 'ca.json')
-mk_group_result_path = lambda args, group_id: os_path.join(mk_path(args), f'group_{group_id}.json')
-mk_role_result_raw_path = lambda args, role_id: os_path.join(mk_path(args), f'role_{role_id}_raw.json')
-mk_role_result_resolved_path = lambda args, role_id: os_path.join(mk_path(args), f'role_{role_id}_resolved.json')
+mk_group_result_transitive_path = lambda args, group_id: os_path.join(mk_path(args), f'group_{group_id}.json')
+mk_role_assignment_raw_path = lambda args, role_id: os_path.join(mk_path(args), f'role_{role_id}_raw.json')
+mk_role_result_transitive_path = lambda args, role_id: os_path.join(mk_path(args), f'role_{role_id}_resolved.json')
 mk_all_users_path = lambda args: os_path.join(mk_path(args), 'all_users.json')
 mk_all_service_principals_path = lambda args: os_path.join(mk_path(args), 'all_service_principals.json')  # az_ad_sp_list --all
 mk_users_licenses = lambda args: os_path.join(mk_path(args), 'licenses.json')
@@ -26,12 +28,16 @@ _IN_MEMORY_CACHE: dict[str, typing.Any] = {}
 
 def get_cached(key: str) -> typing.Any:
     if key.startswith(IN_MEM_CACHE_PREFIX):
-        return _IN_MEMORY_CACHE.get(key)
+        cached = _IN_MEMORY_CACHE.get(key)
+        if not cached:
+            logger.info('Cache miss with key=%s', key)
+        return cached
     else:
         if os.path.exists(key):
             # Cache this
             with open(key) as in_f:
                 return json.load(in_f, object_hook=catharsis_decoder)
+        logger.info('Cache miss with key=%s', key)
         return None
 
 def set_cached(key: str, value: typing.Any) -> typing.Any:
@@ -40,11 +46,6 @@ def set_cached(key: str, value: typing.Any) -> typing.Any:
     else:
         with open(key, 'w') as out_f:
             return json.dump(value, out_f, cls=CatharsisEncoder)
-
-# Refactor me
-
-
-
 
 
 @cache

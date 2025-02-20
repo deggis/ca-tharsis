@@ -10,7 +10,7 @@ from catharsis.azure.azure_graph_queries import ALL_QUERIES, MANAGEMENT_GROUPS_F
 from catharsis.azure.typedefs import AzureMG, AzureSub
 from catharsis.disjoint_sets import GroupMembers, split_to_disjoint_sets_ordered
 from catharsis.typedefs import Principal, RunConf
-from catharsis.utils import fetch_az_graph_query, get_members, get_principals, run_cmd, group_members
+from catharsis.utils import fetch_az_graph_query, get_members_azcli, get_principals, run_cmd, group_members
 from catharsis.utils_graphapi import fetch_group_members
 from catharsis.settings import mk_group_result_path
 
