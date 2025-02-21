@@ -1,14 +1,11 @@
-from typing import List, Tuple, Iterable, Set
+from typing import List, Tuple, Set
 from functools import cache
-import json
-from catharsis.cached_get import mk_role_result_transitive_path, mk_group_result_transitive_path
 from catharsis.common_apps import common_apps
 from catharsis.disjoint_sets import GroupMembers, split_to_disjoint_sets_ordered
-from catharsis.typedefs import CAGuid, GeneralInfo, PolicyModel, Principal, PrincipalGuid, UserTargetingDefinition, principal_to_string
-from catharsis import typedefs as CT
+from catharsis.typedefs import CAGuid, GeneralInfo, PolicyModel, PrincipalGuid, UserTargetingDefinition, principal_to_string
 from catharsis import utils
 
-from catharsis.utils import assignedmembers_to_id_set, filter_ca_defs, get_all_prefetched_members, get_members_azcli, principal_dict_to_id_set, principals_to_id_set
+from catharsis.utils import assignedmembers_to_id_set, filter_ca_defs
 from catharsis.settings import ALL_CLIENT_APP_TYPES, META_APP_ALL_UNMETIONED_APPS, MICROSOFT_ADMIN_PORTALS_APP
 
 import catharsis.graph_query as queries

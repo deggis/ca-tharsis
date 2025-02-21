@@ -18,6 +18,7 @@ class AzureSub(NamedTuple):
   guid: str  # GUID
   raw: dict  # Original data
 
+
 class UserTargetingDefinition(NamedTuple):
   included_users: List[PrincipalDisplayname]
   included_groups: List[str]
@@ -27,6 +28,7 @@ class UserTargetingDefinition(NamedTuple):
   excluded_groups: List[str]
   excluded_roles: List[str]
   excludeGuestsOrExternalUsers: List[str]
+
 
 class PolicyModel(NamedTuple):
   id: str
@@ -48,6 +50,7 @@ class PolicyModel(NamedTuple):
   grant_authentication_strength: Any
   session_controls: Any
 
+
 class GeneralInfo(NamedTuple):
   disjoint_artificial_user_groups: Any
   disjoint_artificial_app_groups: Any
@@ -56,6 +59,7 @@ class GeneralInfo(NamedTuple):
   seen_app_user_actions: Any
   users_count: Any
   apps_count: Any
+
 
 class PrincipalType(Enum):
   User = 'User'
@@ -176,6 +180,7 @@ def catharsis_decoder(obj):
     else:
       raise Exception('Cannot decode this type: %s' % catharsis_type)
   return obj
+
 
 def principal_to_string(o: Principal) -> str:
   if o.usertype == PrincipalType.User and o.userDetails:

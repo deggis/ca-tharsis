@@ -1,23 +1,15 @@
-from os.path import join as path_join
 import os
 import shutil
-from typing import List
-from enum import Enum, auto
 import asyncio
 
 from catharsis.ca import create_policymodels
-from catharsis.licenses import get_licenses
 from catharsis.reporting import create_report_section, mk_html5_doc
 from catharsis.settings import catharsis_parser, mk_summary_report_path, mk_summary_report_aux_path
 from catharsis.solver import translate_policymodels_to_task
-from catharsis.utils import count_s, get_members_azcli, ensure_cache_and_workdir, fetch_all_users_azcli, fetch_ca_policy_azcli, prefetch_ca_memberships_with_query
-from catharsis.cached_get import mk_all_users_path
+from catharsis.utils import count_s, ensure_cache_and_workdir, prefetch_ca_memberships_with_query
 from catharsis.graph_query import get_all_users, get_all_service_principals
-from catharsis.typedefs import CatharsisEncoder, catharsis_decoder
-from catharsis.graph_query import get_unresolved_role_assignments
 from catharsis import utils
 import logging
-import json
 
 
 solver_imports_available = True
