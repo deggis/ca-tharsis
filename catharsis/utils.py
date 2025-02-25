@@ -1,11 +1,9 @@
 import math
+import os
 
 from typing import Iterable, Set
 
-
-# from catharsis.settings import mk_all_users_path, mk_group_result_path, mk_all_service_principals_path
-from catharsis.typedefs import PrincipalGuid
-from catharsis.cached_get import *
+from catharsis.typedefs import PrincipalGuid, RunConf
 from catharsis.graph_query import get_group_transitive_members, get_role_transitive_members
 
 import catharsis.typedefs as CT
@@ -13,10 +11,10 @@ import catharsis.graph_query as queries
 
 
 def ensure_cache_and_workdir(args: RunConf):
-  if args.cache_dir and not os.path.exists(args.cache_dir):
-    os.makedirs(args.cache_dir)
+  if args.persist_cache_dir and not os.path.exists(args.persist_cache_dir):
+    os.makedirs(args.persist_cache_dir)
   
-  if args.create_ca_summary and not os.path.exists(args.report_dir):
+  if args.report_dir and not os.path.exists(args.report_dir):
     os.makedirs(args.report_dir)
 
 
@@ -80,3 +78,12 @@ def filter_ca_defs(args, ca_defs):
     return [ca for ca in ca_defs if ca['state'] == 'enabled']
   else:
     return ca_defs
+
+
+def prepare_debug():
+  import debugpy
+  debugpy.listen(5678)
+  print("Waiting for debugger attach")
+  debugpy.wait_for_client()
+  debugpy.breakpoint()
+  print('break on this line')

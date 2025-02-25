@@ -1,18 +1,21 @@
-import argparse
+import logging
 from os import path as os_path
 
-catharsis_parser = argparse.ArgumentParser(
-  prog='CA Policy Gap Analyzer',
-  description='What the program does',
-  epilog='Text at the bottom of help')
-catharsis_parser.add_argument('--cache-dir', type=str)
-catharsis_parser.add_argument('--cache-mem', action='store_true')
-catharsis_parser.add_argument('--report-dir', type=str)
-catharsis_parser.add_argument('--create-ca-summary', action='store_true')
-catharsis_parser.add_argument('--include-report-only', action='store_true')
-catharsis_parser.add_argument('--get-licenses-from-graph', action='store_true', help='Get assigned licenses from Graph API, user per user (slow)')
-catharsis_parser.add_argument('--number-of-solutions', type=int, default=5)
-catharsis_parser.add_argument('--use-solver', action='store_true')
+
+def set_logging():
+  logging.basicConfig(encoding='utf-8', level=logging.INFO)
+  logging.getLogger('azure.identity._internal.decorators').setLevel(logging.WARN)
+  rootlogger = logging.getLogger()
+  rootlogger.handlers = []
+  ch = logging.StreamHandler()
+  ch.setLevel(logging.INFO)
+  # create formatter
+  formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+  # add formatter to ch
+  ch.setFormatter(formatter)
+  # add ch to logger
+  rootlogger.addHandler(ch)
+
 
 mk_report_path = lambda args: args.report_dir
 mk_solutions_report_path = lambda args: os_path.join(args.work_dir, 'summary_solutions.html')

@@ -14,7 +14,7 @@ logger.setLevel(logging.INFO)
 # Common: get data with runconf, translated to catharsis-models
 
 IN_MEM_CACHE_PREFIX = 'mem:'
-mk_path = lambda args: args.cache_dir or IN_MEM_CACHE_PREFIX
+mk_path = lambda args: args.persist_cache_dir or IN_MEM_CACHE_PREFIX
 
 mk_ca_path = lambda args: os_path.join(mk_path(args), 'ca.json')
 mk_group_result_transitive_path = lambda args, group_id: os_path.join(mk_path(args), f'group_{group_id}.json')

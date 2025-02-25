@@ -9,14 +9,12 @@ import operator
 from catharsis.settings import ALL_CLIENT_APP_TYPES
 from catharsis.typedefs import GeneralInfo, PolicyModel
 
-solver_imports_available = True
 try:
   import cpmpy as cp
   from cpmpy.solvers.ortools import OrtSolutionPrinter
 except ImportError:
   cp = None
   OrtSolutionPrinter = None
-  solver_imports_available = False
 
 UNUSED_VARIABLE_COST=1
 

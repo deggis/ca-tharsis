@@ -182,13 +182,23 @@ async def create_report_section(args, policyModels:List[PolicyModel], generalInf
     body_part += '<tr>'
     for cg_data in col_groups:
       for col_name in cg_data['columns']:
+        css_classes = []
         if col_name in d:
           content = d[col_name][i]
         elif col_name == 'Row':
           content = '%d' % (i+1)
         else:
           content = '?'
-        body_part += f'<td>{content}</td>'
+
+        if col_name.startswith('UG'):
+          css_classes.append('ug')
+        elif col_name.startswith('AG'):
+          css_classes.append('ag')
+        if col_name.startswith('UG') or col_name.startswith('AG'):
+          css_classes.append('onoff')
+          css_classes.append('onoff-filled' if content else 'onoff-empty')
+        class_part = (' class ="%s"' % (' '.join(css_classes))) if css_classes else ''
+        body_part += f'<td{class_part}>{content}</td>'
       body_part += f'<td>.</td>' # minified column
     body_part += '</tr>'
 
