@@ -1,0 +1,54 @@
+.catable {
+  font-size: 11pt; 
+  font-family: Arial;
+  /*
+  border-collapse: collapse;
+  cannot use this with Firefox: https://bugzilla.mozilla.org/show_bug.cgi?id=819045
+  */
+  border: 1px solid #888;
+}
+.catable td, th {
+  padding: 5px;
+}
+.catable tr:nth-child(even) {
+  background: #E0E0E0;
+}
+.catable tr:hover {
+  background: silver;
+  cursor: pointer;
+}
+
+th.col-Name {
+  min-width: 30em;
+  text-align: left;
+}
+
+caption {
+  background-color: #eee;
+  font-size: 200%;
+}
+
+col {
+  border-right: 1px solid #aaa;
+}
+
+th.basicinfo          { background-color: #7067cf; }
+th.basicinfo.subtitle { background-color: #cac7ed; }
+
+th.ugs                { background-color: #7b287d; }
+th.ugs.subtitle       { background-color: #df9de0; }
+
+th.ags                { background-color: #bbd8b3; }
+th.ags.subtitle       { background-color: #e5f0e2; }
+
+td.onoff {
+  text-align: center;
+  font-weight: bolder;
+}
+td.ug.onoff-filled {
+  background-color: #7b287d;
+}
+
+td.ag.onoff-filled {
+  background-color: #bbd8b3;
+}

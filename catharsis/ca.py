@@ -1,13 +1,14 @@
+from typing import List, Tuple, Set
 from functools import cache
-import json
-from common_apps import common_apps
-from disjoint_sets import GroupMembers, split_to_disjoint_sets_ordered
-from typedefs import GeneralInfo, PolicyModel, UserTargetingDefinition
+from catharsis.common_apps import common_apps
+from catharsis.disjoint_sets import GroupMembers, split_to_disjoint_sets_ordered
+from catharsis.typedefs import CAGuid, GeneralInfo, PolicyModel, PrincipalGuid, UserTargetingDefinition, principal_to_string
+from catharsis import utils
 
+from catharsis.utils import assignedmembers_to_id_set, filter_ca_defs
+from catharsis.settings import ALL_CLIENT_APP_TYPES, META_APP_ALL_UNMETIONED_APPS, MICROSOFT_ADMIN_PORTALS_APP
 
-from utils import get_all_members, get_members
-from settings import ALL_CLIENT_APP_TYPES, META_APP_ALL_UNMETIONED_APPS, MICROSOFT_ADMIN_PORTALS_APP, mk_ca_path, mk_role_result_resolved_path, mk_group_result_path
-
+import catharsis.graph_query as queries
 
 
 @cache
@@ -18,34 +19,13 @@ def translate_app_guid(app_id):
   else:
     return app_id
 
-def get_policy_defs(args):
-  with open(mk_ca_path(args)) as in_f:
-    ca = json.load(in_f)
-    policy_objects = ca['value']
-    if args.include_report_only:
-      return policy_objects
-    else:
-      return [p for p in policy_objects if p['state'] == 'enabled']
-
-
-def list_referred_groups_roles(args):
-  groups, roles = [], []
-  for ca_policy in get_policy_defs(args):
-    user_targeting = ca_policy['conditions']['users']
-    groups.extend(user_targeting.get('includeGroups', []))
-    roles.extend(user_targeting.get('includeRoles', []))
-    groups.extend(user_targeting.get('excludeGroups', []))
-    roles.extend(user_targeting.get('excludeRoles', []))
-    # TODO: include/excludeGuestsOrExternalUsers missing
-
-  return set(groups), set(roles)
 
 def get_translated_app_conds(conds, key):
   return set([translate_app_guid(aid) for aid in conds[key] if aid not in ['All', 'None']])
 
-def get_all_referenced_apps(args):
+def get_all_referenced_apps(ca_defs):
   apps = set()
-  for ca_policy in get_policy_defs(args):
+  for ca_policy in ca_defs:
     app_conds = ca_policy['conditions']['applications']
     apps.update(get_translated_app_conds(app_conds, 'excludeApplications'))
     apps.update(get_translated_app_conds(app_conds, 'includeApplications'))
@@ -55,19 +35,27 @@ def get_all_referenced_apps(args):
     apps.remove('None')
   return apps
 
-def create_targeting_definition(args, ca_policy) -> UserTargetingDefinition:
+async def create_targeting_definition(args, ca_policy) -> UserTargetingDefinition:
   udef = ca_policy['conditions']['users']
 
-  users_by_ids = get_all_members(args)
+  # TODO: Include also service principals
+  principals_by_ids = await queries.get_all_users(args)
 
   def get_user_upns(udef):
     if udef == ['All']:
-      uids = users_by_ids.keys()
+      uids = principals_by_ids.keys()
     else:
       uids = udef
-    return [users_by_ids[uid]['userPrincipalName'] for uid in uids]
+    result = []
+    for uid in uids:
+      principal = principals_by_ids.get(uid)
+      if principal:
+        result.append(principal_to_string(principal))
+      else:
+        result.append('Principal removed? %s' % uid)
+    return result
 
-  j = UserTargetingDefinition(
+  utd = UserTargetingDefinition(
     included_users=get_user_upns(udef['includeUsers']),
     included_groups=udef['includeGroups'],
     included_roles=udef['includeRoles'],
@@ -77,34 +65,36 @@ def create_targeting_definition(args, ca_policy) -> UserTargetingDefinition:
     excluded_roles=udef['excludeRoles'],
     excludeGuestsOrExternalUsers=udef['excludeGuestsOrExternalUsers'],
   )
-  return j
+  return utd
 
-
-
-def resolve_members_for_policy_objects(args, user_selection):
+async def resolve_members_for_policy_objects(args, user_selection) -> dict[CAGuid, Set[PrincipalGuid]]:
   # policy_id guid: set of user guids (lowercase)
   memberships = {}
 
-  for ca_policy in get_policy_defs(args):
+  to_set = assignedmembers_to_id_set
+
+  ca_defs = await queries.get_ca_policy_defs(args)
+  ca_defs = filter_ca_defs(args, ca_defs)
+  for ca_policy in ca_defs:
     user_targeting = ca_policy['conditions']['users']
-    included = set()
+    included: Set[PrincipalGuid] = set()
     if user_targeting['includeUsers'] == ['All']:
       included = user_selection.copy()
     else:
       for includedRoleId in user_targeting['includeRoles']:
-        included |= get_members(mk_role_result_resolved_path(args, includedRoleId))
+        included |= to_set(await queries.get_role_transitive_members(args, includedRoleId))
       for includedGroupId in user_targeting['includeGroups']:
-        included |= get_members(mk_group_result_path(args, includedGroupId))
+        included |= to_set(await queries.get_group_transitive_members(args, includedGroupId))
       for includedUserId in user_targeting['includeUsers']:
         included.add(includedUserId)
       # FIXME: check includeGuestsOrExternalUsers
 
     for excludedRoleId in user_targeting['excludeRoles']:
-      for excludedMember in get_members(mk_role_result_resolved_path(args, excludedRoleId)):
+      for excludedMember in to_set(await queries.get_role_transitive_members(args, excludedRoleId)):
         if excludedMember in included:
           included.remove(excludedMember)
     for excludedGroupId in user_targeting['excludeGroups']:
-      for excludedMember in get_members(mk_group_result_path(args, excludedGroupId)):
+      for excludedMember in to_set(await queries.get_group_transitive_members(args, excludedGroupId)):
         if excludedMember in included:
           included.remove(excludedMember)
     for excludedUserId in user_targeting['excludeUsers']:
@@ -120,10 +110,9 @@ def resolve_members_for_policy_objects(args, user_selection):
     
   return memberships
 
-def resolve_apps_for_policy_objects(args, all_apps):
+def resolve_apps_for_policy_objects(args, all_apps, ca_defs):
   memberships = {}
-
-  for ca_policy in get_policy_defs(args):
+  for ca_policy in ca_defs:
     app_conds = ca_policy['conditions']['applications']
     included = set()
     if app_conds['includeApplications'] == ['All']:
@@ -150,20 +139,25 @@ def translate_session_controls(session_control_list):
   return session_controls
 
 
-def create_policymodels(args, user_selection):
+async def create_policymodels(args, principal_selection) -> Tuple[List[PolicyModel], GeneralInfo]:
+  principal_ids: Set[str] = utils.principals_to_id_set(principal_selection)
+
   # Users
-  policy_user_memberships = resolve_members_for_policy_objects(args, user_selection)
-  policy_user_memberships['all_meta'] = user_selection.copy()
+  policy_user_memberships = await resolve_members_for_policy_objects(args, principal_ids)
+  policy_user_memberships['all_meta'] = principal_ids.copy()
 
   users_task = [GroupMembers(name=policy_id, members=members)
       for policy_id, members in policy_user_memberships.items()]
   policy_user_groups, dja_user_groups = split_to_disjoint_sets_ordered(users_task)
+  
+  ca_defs = await queries.get_ca_policy_defs(args)
+  ca_defs = filter_ca_defs(args, ca_defs)
 
   # Applications
-  all_apps = get_all_referenced_apps(args)
+  all_apps = get_all_referenced_apps(ca_defs)
   all_apps.add(META_APP_ALL_UNMETIONED_APPS)
   all_apps.add(MICROSOFT_ADMIN_PORTALS_APP)  # make sure this is in separately
-  policy_app_memberships = resolve_apps_for_policy_objects(args, all_apps)
+  policy_app_memberships = resolve_apps_for_policy_objects(args, all_apps, ca_defs)
   apps_task = [GroupMembers(name=policy_id, members=members)
       for policy_id, members in policy_app_memberships.items()]
   policy_app_groups, dja_app_groups = split_to_disjoint_sets_ordered(apps_task)
@@ -174,7 +168,7 @@ def create_policymodels(args, user_selection):
 
   # Create models
   policyModels = []
-  for ca_policy in get_policy_defs(args):
+  for ca_policy in ca_defs:
     enabled = ca_policy['state'] == 'enabled'
     policy_id = ca_policy['id']
 
@@ -190,7 +184,9 @@ def create_policymodels(args, user_selection):
       grant_operator = ca_grant_controls['operator']
       grant_controls = ca_grant_controls['builtInControls']
       seen_grant_controls.update(grant_controls)
-   
+    else:
+      grant_controls = []
+
     authenticationStrength = None
     if ca_grant_controls:
       if strength := ca_grant_controls.get('authenticationStrength'):
@@ -217,7 +213,7 @@ def create_policymodels(args, user_selection):
     signin_risk_levels = set(conditions['signInRiskLevels'])
     user_risk_levels = set(conditions['userRiskLevels'])
 
-    targeting_definition = create_targeting_definition(args, ca_policy)
+    targeting_definition = await create_targeting_definition(args, ca_policy)
 
     policyModels.append(PolicyModel(
       id=policy_id,
@@ -243,7 +239,7 @@ def create_policymodels(args, user_selection):
     seen_grant_controls=seen_grant_controls,
     seen_session_controls=seen_session_controls,
     seen_app_user_actions=seen_app_user_actions,
-    users_count=len(user_selection),
+    users_count=len(principal_ids),
     apps_count=len(all_apps)
   )
 
