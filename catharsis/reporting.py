@@ -1,6 +1,5 @@
 
 import csv
-import json
 from typing import List
 
 import pandas as pd
@@ -8,7 +7,7 @@ from catharsis.graph_query import get_all_principals
 from catharsis.typedefs import GeneralInfo, PolicyModel, principal_to_string
 
 from catharsis.settings import mk_report_csv_path, mk_report_ca_coverage_path, mk_solutions_report_path
-from catharsis.cached_get import mk_all_users_path
+
 
 mk_html5_doc = lambda title, body_content: """
 <html>

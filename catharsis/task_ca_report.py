@@ -10,6 +10,10 @@ from catharsis.graph_query import get_all_users, get_all_service_principals
 from catharsis import utils
 
 
+import logging
+logger = logging.getLogger('catharsis.task_ca_report')
+logger.setLevel(logging.INFO)
+
 """
 TODO: Warnings
 - https://learn.microsoft.com/en-us/entra/identity/conditional-access/migrate-approved-client-app
@@ -41,11 +45,14 @@ async def do_task_ca_report(args: RunConf):
 
   # TODO Add Service Principals
 
-  with open(mk_summary_report_path(args), 'w') as out_f:
+  report_path = mk_summary_report_path(args)
+  logger.info('Writing CA summary report to: %s', report_path)
+  with open(report_path, 'w') as out_f:
     out_f.write(mk_html5_doc('CA report', body_content))
   dirname, _ = os.path.split(os.path.abspath(__file__))
   shutil.copy(os.path.join(dirname, '..', 'static', 'app.js'), mk_summary_report_aux_path(args, 'app.js'))
   shutil.copy(os.path.join(dirname, '..', 'static', 'style.css'), mk_summary_report_aux_path(args, 'style.css'))
+  logger.info('Task ready.')
 
 def add_ca_report_subparser(subparsers):
   ca_report_parser = subparsers.add_parser('ca-report')
