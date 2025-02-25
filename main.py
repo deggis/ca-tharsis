@@ -1,6 +1,7 @@
 import asyncio
 import argparse
 
+from catharsis.settings import setup_logging
 from catharsis.task_ca_report import add_ca_report_subparser
 from catharsis.task_solver import add_solver_subparser
 from catharsis import utils
@@ -20,9 +21,11 @@ async def main():
   add_ca_report_subparser(subparsers)
   add_solver_subparser(subparsers)
   args = catharsis_parser.parse_args()
+  setup_logging(args)
 
   if args.debug:
     utils.prepare_debug()
+  args._tenant_id_checked = False
   await args.task_func(args)
 
 if __name__ == '__main__':

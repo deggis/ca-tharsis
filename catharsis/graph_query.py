@@ -9,6 +9,7 @@ from msgraph import GraphServiceClient
 from msgraph.generated.models.user import User as MSGUser
 from msgraph.generated.models.service_principal import ServicePrincipal as MSGServicePrincipal
 from msgraph.generated.models.unified_role_assignment import UnifiedRoleAssignment as MSGUnifiedRoleAssignment
+from msgraph.generated.models.organization import Organization as MSGOrganization
 from msgraph.generated.models.o_data_errors.o_data_error import ODataError
 
 from msgraph.generated.role_management.entitlement_management.role_assignments.role_assignments_request_builder import RoleAssignmentsRequestBuilder
@@ -21,6 +22,7 @@ from azure.identity import AzureCliCredential
 from catharsis.typedefs import RunConf
 import catharsis.typedefs as CT
 import catharsis.cached_get as c
+from catharsis import utils
 
 import logging
 logger = logging.getLogger('catharsis.graph_query')
@@ -29,11 +31,24 @@ logger.setLevel(logging.INFO)
 
 # Graph SDK
 
-
-def get_msgraph_client(args: RunConf):
+async def get_msgraph_client(args: RunConf, tenant_id_check=True):
   credential = AzureCliCredential()
   scopes = ['https://graph.microsoft.com/.default']
-  return GraphServiceClient(credentials=credential, scopes=scopes)
+  client = GraphServiceClient(credentials=credential, scopes=scopes)
+
+  # Nothing prevents user from pointing cache dir (or other caching)
+  # towards a place that hosts stuff from other tenant. Except this.
+  if tenant_id_check and not args._tenant_id_checked:
+    online_tenant = await get_online_tenant(args)
+    if utils.is_cache_persisted(args):
+      logger.info("Graph client requested. Cache is persisted. Double checking that online tenant id matches to cached before first request.")
+      cached_tenant = get_cached_tenant(args)
+      if cached_tenant and (cached_tenant.tenantId != online_tenant.tenantId):
+        raise Exception("Cache exists and cached and online tenant id's do not match. Quitting.")
+    logger.info('Created Graph client for tenant: %s', utils.tenant_to_str(online_tenant))
+    args._tenant_id_checked = True
+    set_cached_tenant(args, online_tenant)
+  return client
 
 
 async def do_msgraph_sdk_graph_query(request_builder, initial_method_name='get', req_conf=None):
@@ -99,6 +114,10 @@ async def _get_msgraph_role_assignment(client: GraphServiceClient, role_id: str)
     assert result.odata_next_link == None
     return result
 
+async def _get_msgraph_tenantid(client: GraphServiceClient) -> MSGOrganization:
+  resp = await client.organization.get()
+  return resp.value[0]
+
 # Utils on top of fetchers
 
 
@@ -124,7 +143,7 @@ async def get_ca_policy_defs(args: RunConf):
   """ Returns the original CA response """
   key = c.mk_ca_path(args)
   async def fn():
-    result = await _get_msgraph_ca_policy_json(get_msgraph_client(args))
+    result = await _get_msgraph_ca_policy_json(await get_msgraph_client(args))
     return result['value']
   return await cached_query(args, key, fn)
 
@@ -135,7 +154,7 @@ async def get_unresolved_role_assignments(args: RunConf, role_id: str) -> List[C
     return CT.AssignedMember(principalId=assignment.principal_id, principalType=CT.map_odata_type_to_principaltype(assignment.principal.odata_type))
   key = c.mk_role_assignment_raw_path(args, role_id)
   async def fn():
-    result = await _get_msgraph_role_assignment(get_msgraph_client(args), role_id)
+    result = await _get_msgraph_role_assignment(await get_msgraph_client(args), role_id)
     assignments = [role_assignment_to_type(a) for a in result.value]
     return assignments
   return await cached_query(args, key, fn)
@@ -153,7 +172,7 @@ async def get_all_users(args: RunConf) -> dict[CT.PrincipalGuid, CT.Principal]:
     )
   key = c.mk_all_users_path(args)
   async def fn():
-    result = await _get_msgraph_all_users(get_msgraph_client(args))
+    result = await _get_msgraph_all_users(await get_msgraph_client(args))
     principals: dict[str, CT.Principal] = {u.id:msgraph_user_to_principal(u) for u in result}
     return principals
   return await cached_query(args, key, fn)
@@ -163,7 +182,7 @@ async def get_group_transitive_members(args: RunConf, group_id: str) -> List[CT.
   key = c.mk_group_result_transitive_path(args, group_id)
   async def fn():
     try:
-      result = await _get_msgraph_group_transitive_members(get_msgraph_client(args), group_id)
+      result = await _get_msgraph_group_transitive_members(await get_msgraph_client(args), group_id)
       mapped = [CT.AssignedMember(principalId=p.id, principalType=CT.map_odata_type_to_principaltype(p.odata_type)) for p in result]
       excl_devices = [p for p in mapped if p.principalType != CT.PrincipalType.Device]
       return excl_devices
@@ -233,7 +252,7 @@ async def get_all_service_principals(args: RunConf) -> dict[CT.PrincipalGuid, CT
 
   key = c.mk_all_service_principals_path(args)
   async def fn():
-    result = await _get_msgraph_all_service_principals(get_msgraph_client(args))
+    result = await _get_msgraph_all_service_principals(await get_msgraph_client(args))
     principals: dict[str, CT.Principal] = {u.id:msgraph_sp_to_principal(u) for u in result}
     return principals
   return await cached_query(args, key, fn)
@@ -248,3 +267,27 @@ async def get_all_principals(args: RunConf) -> dict[CT.PrincipalGuid, CT.Princip
   for principalId, principal in users.items():
     result[principalId] = principal
   return result
+
+
+# Exception for handling Tenant: explicit caching.
+
+def get_cached_tenant(args: RunConf) -> CT.Tenant:
+  key = c.mk_tenant_id(args)
+  return c.get_cached(key)
+
+async def get_online_tenant(args: RunConf) -> CT.Tenant:
+  org: MSGOrganization = await _get_msgraph_tenantid(await get_msgraph_client(args, tenant_id_check=False))
+  def get_default_domain(verified_domains):
+    for vf in verified_domains:
+      if vf.is_default:
+        return vf.name
+    return 'no_default_domain'
+  return CT.Tenant(
+    tenantId=org.id,
+    displayName=org.display_name,
+    defaultDomain=get_default_domain(org.verified_domains)
+  )
+
+def set_cached_tenant(args: RunConf, tenant: CT.Tenant):
+  cache_key = c.mk_tenant_id(args)
+  c.set_cached(cache_key, tenant)

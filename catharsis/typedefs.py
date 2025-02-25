@@ -110,6 +110,11 @@ class AssignedMember:
   principalId: str
   principalType: PrincipalType   # microsoft.graph.[user,group,servicePrincipal]
 
+@dataclass
+class Tenant:
+  tenantId: str
+  displayName: str
+  defaultDomain: str
 
 @dataclass
 class ServicePrincipalDetails:
@@ -145,7 +150,8 @@ decoded_dataclasses = {
   'Principal': Principal,
   'UserPrincipalDetails': UserPrincipalDetails,
   'ServicePrincipalDetails': ServicePrincipalDetails,
-  'AssignedMember': AssignedMember
+  'AssignedMember': AssignedMember,
+  'Tenant': Tenant
 }
 
 decoded_enums = {

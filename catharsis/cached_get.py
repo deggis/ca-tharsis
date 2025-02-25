@@ -23,6 +23,8 @@ mk_role_result_transitive_path = lambda args, role_id: os_path.join(mk_path(args
 mk_all_users_path = lambda args: os_path.join(mk_path(args), 'all_users.json')
 mk_all_service_principals_path = lambda args: os_path.join(mk_path(args), 'all_service_principals.json')  # az_ad_sp_list --all
 mk_users_licenses = lambda args: os_path.join(mk_path(args), 'licenses.json')
+mk_tenant_id = lambda args: os_path.join(mk_path(args), 'tenantid.json')
+
 
 _IN_MEMORY_CACHE: dict[str, typing.Any] = {}
 
@@ -67,7 +69,6 @@ def _get_user_principals(path: str) -> dict[str, Principal]:
 
 def get_user_principals(args: RunConf) -> dict[str, Principal]:
   return _get_user_principals(mk_all_users_path(args))
-
 
 
 @cache

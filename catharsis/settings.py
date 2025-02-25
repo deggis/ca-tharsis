@@ -1,8 +1,10 @@
 import logging
 from os import path as os_path
 
+from catharsis.typedefs import RunConf
 
-def set_logging():
+
+def setup_logging(args: RunConf):
   logging.basicConfig(encoding='utf-8', level=logging.INFO)
   logging.getLogger('azure.identity._internal.decorators').setLevel(logging.WARN)
   rootlogger = logging.getLogger()

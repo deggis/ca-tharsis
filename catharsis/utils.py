@@ -79,6 +79,12 @@ def filter_ca_defs(args, ca_defs):
   else:
     return ca_defs
 
+def is_cache_persisted(args: RunConf):
+  return args.persist_cache_dir is not None
+
+def tenant_to_str(tenant: CT.Tenant):
+  return f'{tenant.displayName}: {tenant.defaultDomain} ({tenant.tenantId})'
+
 
 def prepare_debug():
   import debugpy
