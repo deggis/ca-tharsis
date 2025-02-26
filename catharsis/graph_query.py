@@ -22,7 +22,6 @@ from azure.identity import AzureCliCredential
 from catharsis.typedefs import RunConf
 import catharsis.typedefs as CT
 import catharsis.cached_get as c
-from catharsis import utils
 
 import logging
 logger = logging.getLogger('catharsis.graph_query')
@@ -31,23 +30,26 @@ logger.setLevel(logging.INFO)
 
 # Graph SDK
 
-async def get_msgraph_client(args: RunConf, tenant_id_check=True):
-  credential = AzureCliCredential()
-  scopes = ['https://graph.microsoft.com/.default']
-  client = GraphServiceClient(credentials=credential, scopes=scopes)
-
+async def ensure_cache_matches(args: RunConf, tenant_id_check=True):
   # Nothing prevents user from pointing cache dir (or other caching)
   # towards a place that hosts stuff from other tenant. Except this.
   if tenant_id_check and not args._tenant_id_checked:
     online_tenant = await get_online_tenant(args)
-    if utils.is_cache_persisted(args):
+    if c.is_cache_persisted(args):
       logger.info("Graph client requested. Cache is persisted. Double checking that online tenant id matches to cached before first request.")
       cached_tenant = get_cached_tenant(args)
       if cached_tenant and (cached_tenant.tenantId != online_tenant.tenantId):
         raise Exception("Cache exists and cached and online tenant id's do not match. Quitting.")
-    logger.info('Created Graph client for tenant: %s', utils.tenant_to_str(online_tenant))
+    logger.info('Created Graph client for tenant: %s', CT.tenant_to_str(online_tenant))
     args._tenant_id_checked = True
     set_cached_tenant(args, online_tenant)
+
+
+async def get_msgraph_client(args: RunConf, tenant_id_check=True):
+  credential = AzureCliCredential()
+  scopes = ['https://graph.microsoft.com/.default']
+  client = GraphServiceClient(credentials=credential, scopes=scopes)
+  await ensure_cache_matches(args, tenant_id_check)
   return client
 
 

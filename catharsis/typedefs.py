@@ -11,13 +11,13 @@ from typing import TypeAlias, NamedTuple
 PrincipalGuid: TypeAlias = str
 PrincipalDisplayname: TypeAlias = str
 CAGuid: TypeAlias = str
+SubGuid: TypeAlias = str
+EntraRoleGuid: TypeAlias = str
+AzureRBACRoleGuid: TypeAlias = str
+MGName: TypeAlias = str
 
 
-class AzureSub(NamedTuple):
-  id: str    # /subscriptions/GUID
-  guid: str  # GUID
-  raw: dict  # Original data
-
+# ca-tharsis internal structures
 
 class UserTargetingDefinition(NamedTuple):
   included_users: List[PrincipalDisplayname]
@@ -61,6 +61,8 @@ class GeneralInfo(NamedTuple):
   apps_count: Any
 
 
+# entra structures / mappings
+
 class PrincipalType(Enum):
   User = 'User'
   ServicePrincipal = 'SP'
@@ -96,14 +98,6 @@ class ServicePrincipalType(Enum):
 
   def __repr__(self) -> str:
     return str(self.value)
-
-"""
-@dataclass
-class RawRoleAssignment:
-  roleId: str
-  principalId: str
-  odata_type: str   # microsoft.graph.[user,group,servicePrincipal]
-"""
 
 @dataclass
 class AssignedMember:
@@ -141,8 +135,48 @@ class Principal:
   userDetails: Optional[UserPrincipalDetails] = None
   # todo lastupdated timestamp
 
-  def __repr__(self) -> str:
-    return principal_to_string(self)
+
+
+# azure structures/mappings
+
+@dataclass
+class AzureSub:
+  id: str    # /subscriptions/GUID
+  guid: str  # GUID
+  name: str  # Name
+  raw: dict  # Original data
+
+
+@dataclass
+class AzureMG:
+  """
+  Could it really be that Azure Management Group objects don't
+  have a separate GUID identifier?
+  """
+
+  # mg_name is essentially the id; id only prefixes it with /providers/Microsoft.Management/managementGroups/
+  id: str          # /providers/...
+  name: str        # name
+  displayName: str
+  raw: dict        # Original data
+
+
+@dataclass
+class GenericRGResource:
+  id: str
+  raw: dict
+
+@dataclass
+class AzureRBACAssignment:
+  id: str
+  principalId: str
+  principalType: PrincipalType
+  roleGuid: str
+  roleName: str
+
+
+
+# encoders/decoders
 
 CATHARSIS_TYPE = 'C_TYPE'
 
@@ -151,7 +185,11 @@ decoded_dataclasses = {
   'UserPrincipalDetails': UserPrincipalDetails,
   'ServicePrincipalDetails': ServicePrincipalDetails,
   'AssignedMember': AssignedMember,
-  'Tenant': Tenant
+  'Tenant': Tenant,
+  'AzureSub': AzureSub,
+  'AzureMG': AzureMG,
+  'GenericRGResource': GenericRGResource,
+  'AzureRBACAssignment': AzureRBACAssignment
 }
 
 decoded_enums = {
@@ -186,6 +224,12 @@ def catharsis_decoder(obj):
     else:
       raise Exception('Cannot decode this type: %s' % catharsis_type)
   return obj
+
+
+# to_strings
+
+def tenant_to_str(tenant: Tenant):
+  return f'{tenant.displayName}: {tenant.defaultDomain} ({tenant.tenantId})'
 
 
 def principal_to_string(o: Principal) -> str:

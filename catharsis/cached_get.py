@@ -16,6 +16,7 @@ logger.setLevel(logging.INFO)
 IN_MEM_CACHE_PREFIX = 'mem:'
 mk_path = lambda args: args.persist_cache_dir or IN_MEM_CACHE_PREFIX
 
+# Entra
 mk_ca_path = lambda args: os_path.join(mk_path(args), 'ca.json')
 mk_group_result_transitive_path = lambda args, group_id: os_path.join(mk_path(args), f'group_{group_id}.json')
 mk_role_assignment_raw_path = lambda args, role_id: os_path.join(mk_path(args), f'role_{role_id}_raw.json')
@@ -25,8 +26,16 @@ mk_all_service_principals_path = lambda args: os_path.join(mk_path(args), 'all_s
 mk_users_licenses = lambda args: os_path.join(mk_path(args), 'licenses.json')
 mk_tenant_id = lambda args: os_path.join(mk_path(args), 'tenantid.json')
 
+# Azure
+mk_azure_subs = lambda args: os_path.join(mk_path(args), 'azure_subscriptions.json')
+mk_azure_mgs = lambda args: os_path.join(mk_path(args), 'azure_management_groups.json')
+mk_azure_sub_assignment_raw_path = lambda args, sub_guid: os_path.join(mk_path(args), f'azure_sub_assignment_{sub_guid}_raw.json')
+mk_azure_mg_assignment_raw_path = lambda args, mg_name: os_path.join(mk_path(args), f'azure_mg_assignment_{mg_name}_raw.json')
 
 _IN_MEMORY_CACHE: dict[str, typing.Any] = {}
+
+def is_cache_persisted(args: RunConf):
+  return args.persist_cache_dir is not None
 
 def get_cached(key: str) -> typing.Any:
     if key.startswith(IN_MEM_CACHE_PREFIX):

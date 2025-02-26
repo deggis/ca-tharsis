@@ -14,7 +14,7 @@ def ensure_cache_and_workdir(args: RunConf):
   if args.persist_cache_dir and not os.path.exists(args.persist_cache_dir):
     os.makedirs(args.persist_cache_dir)
   
-  if args.report_dir and not os.path.exists(args.report_dir):
+  if 'report_dir' in args and args.report_dir and not os.path.exists(args.report_dir):
     os.makedirs(args.report_dir)
 
 
@@ -78,12 +78,6 @@ def filter_ca_defs(args, ca_defs):
     return [ca for ca in ca_defs if ca['state'] == 'enabled']
   else:
     return ca_defs
-
-def is_cache_persisted(args: RunConf):
-  return args.persist_cache_dir is not None
-
-def tenant_to_str(tenant: CT.Tenant):
-  return f'{tenant.displayName}: {tenant.defaultDomain} ({tenant.tenantId})'
 
 
 def prepare_debug():

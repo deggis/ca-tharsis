@@ -5,7 +5,7 @@ from catharsis.ca import create_policymodels
 from catharsis.reporting import create_report_section, mk_html5_doc
 from catharsis.settings import mk_summary_report_path, mk_summary_report_aux_path
 from catharsis.typedefs import RunConf
-from catharsis.utils import count_s, ensure_cache_and_workdir, prefetch_ca_memberships_with_query
+from catharsis.utils import count_s, prefetch_ca_memberships_with_query
 from catharsis.graph_query import get_all_users, get_all_service_principals
 from catharsis import utils
 
@@ -20,7 +20,6 @@ TODO: Warnings
 """
 
 async def do_task_ca_report(args: RunConf):
-  ensure_cache_and_workdir(args)
   await get_all_users(args)
   await get_all_service_principals(args)
   await prefetch_ca_memberships_with_query(args)
@@ -50,8 +49,8 @@ async def do_task_ca_report(args: RunConf):
   with open(report_path, 'w') as out_f:
     out_f.write(mk_html5_doc('CA report', body_content))
   dirname, _ = os.path.split(os.path.abspath(__file__))
-  shutil.copy(os.path.join(dirname, '..', 'static', 'app.js'), mk_summary_report_aux_path(args, 'app.js'))
-  shutil.copy(os.path.join(dirname, '..', 'static', 'style.css'), mk_summary_report_aux_path(args, 'style.css'))
+  shutil.copy(os.path.join(dirname, 'static', 'app.js'), mk_summary_report_aux_path(args, 'app.js'))
+  shutil.copy(os.path.join(dirname, 'static', 'style.css'), mk_summary_report_aux_path(args, 'style.css'))
   logger.info('Task ready.')
 
 def add_ca_report_subparser(subparsers):

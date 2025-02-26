@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ca-tharsis"
+version = "0.3.0"
+authors = [
+  { name="Heikki Salo", email="heikki.ao.salo@iki.fi" },
+]
+description = "Some utils for Entra Conditional Access"
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3"
+]
+license = {text="MIT"}
+dependencies = [
+    "pandas==2.2.1",
+    "azure-mgmt-authorization>=4.0.0",
+    "azure-identity>=1.19.0",
+    "azure-mgmt-resource>=23.2.0",
+    "azure-mgmt-resourcegraph>=8.0.0",
+    "azure-mgmt-securityinsight>=1.0.0",
+    "msgraph-sdk>=1.18.0"
+]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["catharsis*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.css", "*.js"]
+
+[project.urls]
+Homepage = "https://github.com/deggis/ca-tharsis"
+Issues = "https://github.com/deggis/ca-tharsis"

@@ -1,18 +1,11 @@
-
-
-
 import json
 import os
 import itertools
 import csv
-from typing import List
-from catharsis.azure.azure_graph_queries import ALL_QUERIES, MANAGEMENT_GROUPS_FILE, get_az_result_path, SUBSCRIPTIONS_FILE
-from catharsis.azure.typedefs import AzureMG, AzureSub
+from typing import List, Set
+from catharsis.azure.azure_resource_graph_queries import ALL_QUERIES, MANAGEMENT_GROUPS_FILE, get_az_result_path, SUBSCRIPTIONS_FILE, get_managementgroups, get_mg_raw_assignments, get_sub_raw_assignments, get_subscriptions, get_transitive_rbac_members, resource_graph_query
 from catharsis.disjoint_sets import GroupMembers, split_to_disjoint_sets_ordered
-from catharsis.typedefs import Principal, RunConf
-from catharsis.utils import fetch_az_graph_query, get_members_azcli, get_principals, run_cmd, group_members
-from catharsis.utils_graphapi import fetch_group_members
-from catharsis.settings import mk_group_result_path
+import catharsis.typedefs as CT
 
 mk_azure_sub_assignment_path = lambda args, sub_id: os.path.join(args.work_dir, f'azure_sub_assignments_{sub_id}.json')
 # Note: Tenant Root Group will have a GUID as name
@@ -20,25 +13,27 @@ mk_azure_sub_assignment_path = lambda args, sub_id: os.path.join(args.work_dir, 
 mk_azure_mg_assignment_path = lambda args, mg_name: os.path.join(args.work_dir, f'azure_mg_assignments_{mg_name}.json')
 
 # Note: custom roles skipped for now
-PRIVILEGED_AZURE_ROLES = [
-    "Owner",
-    "Contributor",
-    "Access Review Operator Service Role",
-    "Role Based Access Control Administrator",
-    "User Access Administrator"
-]
+# https://learn.microsoft.com/en-us/azure/role-based-access-control/built-in-roles#privileged
+PRIVILEGED_AZURE_ROLES = {
+    "Owner": "8e3af657-a8ff-443c-a75c-2fe8c4bcb635",
+    "Contributor": "b24988ac-6180-42a0-ab88-20f7382dd24c",
+    "Reservations Administrator": "a8889054-8d42-49c9-bc1c-52486c10e7cd",
+    "Role Based Access Control Administrator": "f58310d9-a9f6-439a-9e8d-f62e7b41a168",
+    "User Access Administrator": "18d7d88d-d35e-4fb5-a5c3-7773c20a72d9"
+}
+PRIVILEGED_AZURE_ROLE_GUIDS = set(PRIVILEGED_AZURE_ROLES.values())
 
-def get_graph_result_file(args: RunConf, fn: str):
+def get_graph_result_file(args: CT.RunConf, fn: str):
     with open(get_az_result_path(args, fn)) as in_f:
         return json.load(in_f)
 
-def fetch_scope_assignments(args: RunConf, resource_id: str, full_path: str):
+def fetch_scope_assignments(args: CT.RunConf, resource_id: str, full_path: str):
     if not args.force_update and os.path.exists(full_path):
         return
     cmd = 'az role assignment list --scope "%s" > %s' % (resource_id, full_path)
     run_cmd(cmd)
 
-def get_scope_assignment_referenced_groups(args: RunConf, full_path: str) -> List[str]:
+def get_scope_assignment_referenced_groups(args: CT.RunConf, full_path: str) -> List[str]:
     group_ids = []
     with open(full_path) as in_f:
         scope_assignments = json.load(in_f)
@@ -47,22 +42,15 @@ def get_scope_assignment_referenced_groups(args: RunConf, full_path: str) -> Lis
                 group_ids.append(assignment['principalId'])
     return group_ids
 
-def get_sub_assignment_referenced_groups(args: RunConf, sub: AzureSub) -> List[str]:
+def get_sub_assignment_referenced_groups(args: CT.RunConf, sub: CT.AzureSub) -> List[str]:
     full_path = mk_azure_sub_assignment_path(args, sub.guid)
     return get_scope_assignment_referenced_groups(args, full_path)
 
-def get_mg_assignment_referenced_groups(args: RunConf, mg: AzureMG) -> List[str]:
+def get_mg_assignment_referenced_groups(args: CT.RunConf, mg: CT.AzureMG) -> List[str]:
     full_path = mk_azure_mg_assignment_path(args, mg.name)
     return get_scope_assignment_referenced_groups(args, full_path)
 
-def get_subs(args: RunConf) -> dict[str, AzureSub]:
-    sub_guid = lambda sub: sub['id'].split('/')[-1]
-    return {sub_guid(sub): AzureSub(id=sub['id'], guid=sub_guid(sub), name=sub['name'], raw=sub) for sub in get_graph_result_file(args, SUBSCRIPTIONS_FILE)['data']}
-
-def get_mgs(args: RunConf) -> dict[str, AzureMG]:
-    return {mg['id']: AzureMG(id=mg['id'], name=mg['name'], raw=mg) for mg in get_graph_result_file(args, MANAGEMENT_GROUPS_FILE)['data']}
-
-def get_privileged_principals_by_role(args: RunConf, assignment_path: str) -> dict:
+def get_privileged_principals_by_role(args: CT.RunConf, assignment_path: str) -> dict:
     by_role: dict[str, set[str]] = {}
     with open(assignment_path) as in_f:
         scope_assignments = json.load(in_f)
@@ -80,7 +68,7 @@ def get_privileged_principals_by_role(args: RunConf, assignment_path: str) -> di
 
     return by_role
 
-def fetch_container_roles(args: RunConf) -> tuple[dict, dict]:
+def fetch_container_roles(args: CT.RunConf) -> tuple[dict, dict]:
     mg_privileged_roles_by_containers = {}
     for mg in get_mgs(args).values():
         full_path = mk_azure_mg_assignment_path(args, mg.name)
@@ -123,7 +111,7 @@ def fetch_container_roles(args: RunConf) -> tuple[dict, dict]:
 
     return mg_privileged_roles_by_containers, sub_privileged_roles_by_containers    
 
-def resolve_roles(args: RunConf, all_mg_roles: dict, all_sub_roles: dict):
+def resolve_roles(args: CT.RunConf, all_mg_roles: dict, all_sub_roles: dict):
     principals = get_principals(args)
 
     sub_to_principals_to_roles_to_paths: dict = {}
@@ -162,7 +150,7 @@ def resolve_roles(args: RunConf, all_mg_roles: dict, all_sub_roles: dict):
 
     return principals, principals_to_subs_to_roles, sub_to_roles_to_principals, sub_to_principals_to_roles_to_paths
 
-def do_all_kinds_of_things(args: RunConf, all_mg_roles: dict, all_sub_roles: dict):
+def do_all_kinds_of_things(args: CT.RunConf, all_mg_roles: dict, all_sub_roles: dict):
     principals, principals_to_subs_to_roles, sub_to_roles_to_principals, sub_to_principals_to_roles_to_paths = resolve_roles(args, all_mg_roles, all_sub_roles)
 
     def most_common_principals():
@@ -193,7 +181,7 @@ def do_all_kinds_of_things(args: RunConf, all_mg_roles: dict, all_sub_roles: dic
     with open(fn, 'w') as out_f:
         sorted_principals: List[str] = [p[0] for p in sorted(principals_to_subs_to_roles.items(), key=lambda p: len(p[1]), reverse=True) if p[0] in principals]
         fieldnames = ['Sub name', 'Sub id', 'MG parent']
-        def principal_name(p: Principal):
+        def principal_name(p: CT.Principal):
             return f'{p.displayName} ({p.id})'
 
         for p_id in sorted_principals:
@@ -219,7 +207,7 @@ def do_all_kinds_of_things(args: RunConf, all_mg_roles: dict, all_sub_roles: dic
             writer.writerow(row)
 
 
-def fetch_azure_queries(args: RunConf):
+def fetch_azure_queries(args: CT.RunConf):
     for fn_part, query in ALL_QUERIES:
         full_path = os.path.join(args.work_dir, fn_part)
         if not args.force_update and os.path.exists(full_path):
@@ -234,8 +222,25 @@ def fetch_azure_queries(args: RunConf):
 
     principals, principals_to_subs_to_roles, sub_to_roles_to_principals, sub_to_principals_to_roles_to_paths = resolve_roles(args, mg_roles, sub_roles)
 
-def get_privileged_azure_principals(args: RunConf):
-    fetch_azure_queries(args)
-    mg_roles, sub_roles = fetch_container_roles(args)
-    principals, principals_to_subs_to_roles, sub_to_roles_to_principals, sub_to_principals_to_roles_to_paths = resolve_roles(args, mg_roles, sub_roles)
-    return principals_to_subs_to_roles
+async def get_privileged_azure_principals(args: CT.RunConf):
+    subs = await get_subscriptions(args)
+    mgs = await get_managementgroups(args)
+
+    privileged_principal_guids: Set[CT.PrincipalGuid] = set()
+    #for mg in mgs.values():
+    #    raw_assignments = await get_mg_raw_assignments(args, mg)
+    #    transitive_assignments = await get_transitive_rbac_members(raw_assignments)
+    #    for principalId, roles in transitive_assignments.items():
+    #        if roles & PRIVILEGED_AZURE_ROLE_GUIDS:
+    #            privileged_principal_guids.add(principalId)
+    for sub in subs.values():
+        raw_assignments = await get_sub_raw_assignments(args, sub)
+        transitive_assignments = await get_transitive_rbac_members(args, raw_assignments)
+        for principalId, roles in transitive_assignments.items():
+            if roles & PRIVILEGED_AZURE_ROLE_GUIDS:
+                privileged_principal_guids.add(principalId)
+    # await fetch_azure_queries(args)
+    # mg_roles, sub_roles = fetch_container_roles(args)
+    # principals, principals_to_subs_to_roles, sub_to_roles_to_principals, sub_to_principals_to_roles_to_paths = resolve_roles(args, mg_roles, sub_roles)
+    # return principals_to_subs_to_roles
+    return privileged_principal_guids

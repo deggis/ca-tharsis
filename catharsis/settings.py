@@ -7,6 +7,7 @@ from catharsis.typedefs import RunConf
 def setup_logging(args: RunConf):
   logging.basicConfig(encoding='utf-8', level=logging.INFO)
   logging.getLogger('azure.identity._internal.decorators').setLevel(logging.WARN)
+  logging.getLogger('azure.core.pipeline.policies.http_logging_policy').setLevel(logging.WARN)
   rootlogger = logging.getLogger()
   rootlogger.handlers = []
   ch = logging.StreamHandler()
@@ -33,3 +34,8 @@ MICROSOFT_ADMIN_PORTALS_APP = "MicrosoftAdminPortals"
 ALL_CLIENT_APP_TYPES = ['browser', 'mobileAppsAndDesktopClients', 'exchangeActiveSync', 'other']
 ALL_USER_RISK_LEVELS = ['high', 'medium', 'low', 'none']
 ALL_SIGNIN_RISK_LEVELS = ['high', 'medium', 'low', 'none']
+
+ENTRA_ADMIN_ROLES = {
+  'Application Administrator': '9b895d92-2cd3-44c7-9d02-a6ac2d5ea5c3',
+  'Application Developer': 'cf1c38e5-3621-4004-a7cb-879624dced7c'
+}
