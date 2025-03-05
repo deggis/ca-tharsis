@@ -2,13 +2,13 @@ import os
 from typing import List, Tuple, Callable, Mapping, TypeAlias, Set
 
 from catharsis.graph_query import cached_query, ensure_cache_matches, get_group_transitive_members, get_msgraph_client
+from catharsis.ms_credential import get_ms_credential
 from catharsis.typedefs import RunConf
 from azure.mgmt.resourcegraph.models import QueryRequest
 from azure.mgmt.resourcegraph.models import QueryRequestOptions
 from azure.mgmt.resource import ResourceManagementClient
 from azure.mgmt.authorization import AuthorizationManagementClient
 from azure.mgmt.resourcegraph import ResourceGraphClient
-from azure.identity import AzureCliCredential
 
 import catharsis.typedefs as CT
 import catharsis.cached_get as c
@@ -24,19 +24,19 @@ get_az_result_path: Callable[[RunConf, str], str] = lambda runconf, fn: os.path.
 
 
 async def get_azrm_client(args: RunConf):
-  credential = AzureCliCredential()
+  credential = get_ms_credential(args)
   client = ResourceGraphClient(credential=credential, subscription_id=args.subscription_id)
   await ensure_cache_matches(args)
   return client
 
 async def get_azmgmt_client(args: RunConf):
-  credential = AzureCliCredential()
+  credential = get_ms_credential(args)
   client = ResourceManagementClient(credential=credential, subscription_id=args.subscription_id)
   await ensure_cache_matches(args)
   return client
 
 async def get_az_auth_mgmt_client(args: RunConf):
-  credential = AzureCliCredential()
+  credential = get_ms_credential(args)
   client = AuthorizationManagementClient(credential=credential, subscription_id=args.subscription_id)
   await ensure_cache_matches(args)
   return client

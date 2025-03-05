@@ -17,8 +17,8 @@ from msgraph.generated.users.users_request_builder import UsersRequestBuilder
 from kiota_abstractions.native_response_handler import NativeResponseHandler
 from kiota_http.middleware.options import ResponseHandlerOption
 from kiota_abstractions.base_request_configuration import RequestConfiguration
-from azure.identity import AzureCliCredential
 
+from catharsis.ms_credential import get_ms_credential
 from catharsis.typedefs import RunConf
 import catharsis.typedefs as CT
 import catharsis.cached_get as c
@@ -46,7 +46,7 @@ async def ensure_cache_matches(args: RunConf, tenant_id_check=True):
 
 
 async def get_msgraph_client(args: RunConf, tenant_id_check=True):
-  credential = AzureCliCredential()
+  credential = get_ms_credential(args)
   scopes = ['https://graph.microsoft.com/.default']
   client = GraphServiceClient(credentials=credential, scopes=scopes)
   await ensure_cache_matches(args, tenant_id_check)

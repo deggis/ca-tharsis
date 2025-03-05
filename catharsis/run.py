@@ -16,6 +16,8 @@ async def main(arg_string=None):
   catharsis_parser.add_argument('--debug', action='store_true', help='Enable debugpy debugging.')
   catharsis_parser.add_argument('--include-report-only', action='store_true', help='CA: Include report-only CA policies.')
   catharsis_parser.add_argument('--get-licenses-from-graph', action='store_true', help='Get assigned licenses from Graph API, user per user (slow)')
+  catharsis_parser.add_argument('--auth', choices=['azcli', 'systemassignedmanagedidentity'], default='azcli', help='Configure what credentials are used: AzCliCredentials or a Managed Identity. Default: azcli')
+
 
   subparsers = catharsis_parser.add_subparsers(required=True)
   add_ca_report_subparser(subparsers)
