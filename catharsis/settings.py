@@ -6,18 +6,19 @@ from catharsis.typedefs import RunConf
 
 def setup_logging(args: RunConf):
   logging.basicConfig(encoding='utf-8', level=logging.INFO)
-  logging.getLogger('azure.identity._internal.decorators').setLevel(logging.WARN)
-  logging.getLogger('azure.core.pipeline.policies.http_logging_policy').setLevel(logging.WARN)
-  rootlogger = logging.getLogger()
-  rootlogger.handlers = []
-  ch = logging.StreamHandler()
-  ch.setLevel(logging.INFO)
-  # create formatter
-  formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-  # add formatter to ch
-  ch.setFormatter(formatter)
-  # add ch to logger
-  rootlogger.addHandler(ch)
+  if args.log_output != 'defaulthandler':
+    logging.getLogger('azure.identity._internal.decorators').setLevel(logging.WARN)
+    logging.getLogger('azure.core.pipeline.policies.http_logging_policy').setLevel(logging.WARN)
+    rootlogger = logging.getLogger()
+    rootlogger.handlers = []
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    # create formatter
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    # add formatter to ch
+    ch.setFormatter(formatter)
+    # add ch to logger
+    rootlogger.addHandler(ch)
 
 
 mk_report_path = lambda args: args.report_dir
