@@ -1,5 +1,6 @@
 import json
 import os
+import hashlib
 from typing import List
 from collections.abc import Callable, Awaitable
 
@@ -14,6 +15,7 @@ from msgraph.generated.models.o_data_errors.o_data_error import ODataError
 
 from msgraph.generated.role_management.entitlement_management.role_assignments.role_assignments_request_builder import RoleAssignmentsRequestBuilder
 from msgraph.generated.users.users_request_builder import UsersRequestBuilder
+from msgraph.generated.applications.applications_request_builder import ApplicationsRequestBuilder
 from kiota_abstractions.native_response_handler import NativeResponseHandler
 from kiota_http.middleware.options import ResponseHandlerOption
 from kiota_abstractions.base_request_configuration import RequestConfiguration
@@ -93,17 +95,27 @@ async def _get_msgraph_group_transitive_members(client: GraphServiceClient, grou
   return await do_msgraph_sdk_graph_query(client.groups.by_group_id(group_id=group_id).transitive_members)
 
 
-async def _get_msgraph_all_users(client: GraphServiceClient) -> List[MSGUser]:
+def principal_ids_to_filter_argument(principal_id_selection):
+  id_list = ','.join(["'%s'" % guid for guid in principal_id_selection])
+  return f"id in ({id_list})"
+
+async def _get_msgraph_all_users(client: GraphServiceClient, principal_id_selection: List[CT.PrincipalGuid]=None) -> List[MSGUser]:
   """ https://graph.microsoft.com/beta/users?select=id,accountenabled,userPrincipalName """
   query_params = UsersRequestBuilder.UsersRequestBuilderGetQueryParameters(
     select = ['id', 'userPrincipalName', 'accountenabled', 'displayName']
   )
+  if principal_id_selection:
+    query_params.filter = principal_ids_to_filter_argument(principal_id_selection)
   request_configuration = RequestConfiguration(query_parameters=query_params)
   return await do_msgraph_sdk_graph_query(client.users, req_conf=request_configuration)
 
 
-async def _get_msgraph_all_service_principals(client: GraphServiceClient) -> List[MSGServicePrincipal]:
-  return await do_msgraph_sdk_graph_query(client.service_principals)
+async def _get_msgraph_all_service_principals(client: GraphServiceClient, principal_id_selection: List[CT.PrincipalGuid]=None) -> List[MSGServicePrincipal]:
+  query_params = ApplicationsRequestBuilder.ApplicationsRequestBuilderGetQueryParameters()
+  if principal_id_selection:
+    query_params.filter = principal_ids_to_filter_argument(principal_id_selection)
+  request_configuration = RequestConfiguration(query_parameters=query_params)
+  return await do_msgraph_sdk_graph_query(client.service_principals, req_conf=request_configuration)
 
 
 async def _get_msgraph_role_assignment(client: GraphServiceClient, role_id: str):
@@ -162,7 +174,10 @@ async def get_unresolved_role_assignments(args: RunConf, role_id: str) -> List[C
   return await cached_query(args, key, fn)
 
 
-async def get_all_users(args: RunConf) -> dict[CT.PrincipalGuid, CT.Principal]:
+def sha1sum(msg: str) -> str:
+    return hashlib.sha1(msg.encode()).hexdigest()
+
+async def get_all_users(args: RunConf, principal_id_selection: List[CT.PrincipalGuid]=None) -> dict[CT.PrincipalGuid, CT.Principal]:
   def msgraph_user_to_principal(u: MSGUser) -> CT.Principal:
     return CT.Principal(
       id=u.id,
@@ -172,9 +187,16 @@ async def get_all_users(args: RunConf) -> dict[CT.PrincipalGuid, CT.Principal]:
       usertype=CT.PrincipalType.User,
       userDetails=CT.UserPrincipalDetails(upn=u.user_principal_name)
     )
-  key = c.mk_all_users_path(args)
+  
+  # temp
+  selection_key = ''
+  if principal_id_selection:
+    p_ids = ''.join(sorted(principal_id_selection))
+    selection_key = '_%s' % sha1sum(p_ids)
+
+  key = c.mk_all_users_path(args) + selection_key
   async def fn():
-    result = await _get_msgraph_all_users(await get_msgraph_client(args))
+    result = await _get_msgraph_all_users(await get_msgraph_client(args), principal_id_selection=principal_id_selection)
     principals: dict[str, CT.Principal] = {u.id:msgraph_user_to_principal(u) for u in result}
     return principals
   return await cached_query(args, key, fn)
@@ -217,7 +239,7 @@ async def get_role_transitive_members(args: RunConf, role_id: str) -> List[CT.As
   return await cached_query(args, key, fn)
 
 
-async def get_all_service_principals(args: RunConf) -> dict[CT.PrincipalGuid, CT.Principal]:
+async def get_all_service_principals(args: RunConf, principal_id_selection: List[CT.PrincipalGuid]=None) -> dict[CT.PrincipalGuid, CT.Principal]:
   def map_service_principal_type(sp_type):
     return CT.ServicePrincipalType(sp_type)
 
@@ -252,9 +274,15 @@ async def get_all_service_principals(args: RunConf) -> dict[CT.PrincipalGuid, CT
       usertype=CT.PrincipalType.ServicePrincipal
     )
 
-  key = c.mk_all_service_principals_path(args)
+  # temp
+  selection_key = ''
+  if principal_id_selection:
+    p_ids = ''.join(sorted(principal_id_selection))
+    selection_key = '_%s' % sha1sum(p_ids)
+
+  key = c.mk_all_service_principals_path(args) + selection_key
   async def fn():
-    result = await _get_msgraph_all_service_principals(await get_msgraph_client(args))
+    result = await _get_msgraph_all_service_principals(await get_msgraph_client(args), principal_id_selection=principal_id_selection)
     principals: dict[str, CT.Principal] = {u.id:msgraph_sp_to_principal(u) for u in result}
     return principals
   return await cached_query(args, key, fn)
