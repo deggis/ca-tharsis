@@ -92,7 +92,7 @@ async def _cached_get(args: RunConf, cache_key_fn: Callable, kql_query: str, for
     return results
   return await cached_query(args, cache_key, fn)
 
-async def get_subscriptions(args: RunConf) -> Mapping[CT.SubGuid, CT.AzureSub]:
+async def get_subscriptions(args: RunConf) -> CT.AzureSubs:
   return await _cached_get(args, c.mk_azure_subs, SUBSCRIPTIONS_QUERY, subscription_formatter)
 
 async def get_managementgroups(args: RunConf) -> Mapping[CT.MGName, CT.AzureMG]:
@@ -138,17 +138,28 @@ async def get_sub_raw_assignments(args: RunConf, sub: CT.AzureSub) -> List[CT.Az
   return await cached_query(args, c.mk_azure_sub_assignment_raw_path(args, sub.guid), fn)
 
 
-async def get_transitive_rbac_members(args, raw_assignments: List[CT.AzureRBACAssignment]) -> Mapping[CT.PrincipalGuid, Set[CT.AzureRBACRoleGuid]]:
+async def get_transitive_rbac_members(args, raw_assignments: List[CT.AzureRBACAssignment]) -> Tuple[CT.AzureContainerRoles, CT.AssignedMemberCollection]:
   members_excl_groups: dict[CT.PrincipalGuid, Set[CT.AzureRBACRoleGuid]] = {}
+  assigned_members: dict[CT.PrincipalGuid, CT.AssignedMember] = {}
+
+  def rbac_assignment_to_assignedmember(assignment: CT.AzureRBACAssignment) -> CT.AssignedMember:
+    return CT.AssignedMember(principalId=assignment.principalId, principalType=assignment.principalType)
+  
   for assignment in raw_assignments:
     if assignment.principalType == CT.PrincipalType.Group:
       group_members = await get_group_transitive_members(args, assignment.principalId)
       for group_membership in group_members:
         members_excl_groups.setdefault(group_membership.principalId, set()).add(assignment.roleGuid)
+        if group_membership.principalId not in assigned_members:
+          assigned_members[group_membership.principalId] = group_membership
     elif assignment.principalType == CT.PrincipalType.User:
       members_excl_groups.setdefault(assignment.principalId, set()).add(assignment.roleGuid)
+      if assignment.principalId not in assigned_members:
+        assigned_members[assignment.principalId] = rbac_assignment_to_assignedmember(assignment)
     elif assignment.principalType == CT.PrincipalType.ServicePrincipal:
       members_excl_groups.setdefault(assignment.principalId, set()).add(assignment.roleGuid)
+      if assignment.principalId not in assigned_members:
+        assigned_members[assignment.principalId] = rbac_assignment_to_assignedmember(assignment)
     else:
       raise Exception('Unknown referenced principal type: %s' % str(assignment.principalType))
-  return members_excl_groups
+  return members_excl_groups, assigned_members

@@ -2,7 +2,7 @@ import json
 import os
 import itertools
 import csv
-from typing import List, Set
+from typing import List, Mapping, Set, Tuple, TypeAlias
 from catharsis.azure.azure_resource_graph_queries import ALL_QUERIES, MANAGEMENT_GROUPS_FILE, get_az_result_path, SUBSCRIPTIONS_FILE, get_managementgroups, get_mg_raw_assignments, get_sub_raw_assignments, get_subscriptions, get_transitive_rbac_members, resource_graph_query
 from catharsis.disjoint_sets import GroupMembers, split_to_disjoint_sets_ordered
 import catharsis.typedefs as CT
@@ -222,25 +222,19 @@ def fetch_azure_queries(args: CT.RunConf):
 
     principals, principals_to_subs_to_roles, sub_to_roles_to_principals, sub_to_principals_to_roles_to_paths = resolve_roles(args, mg_roles, sub_roles)
 
-async def get_privileged_azure_principals(args: CT.RunConf):
-    subs = await get_subscriptions(args)
-    mgs = await get_managementgroups(args)
+PrincipalRoles: TypeAlias = dict[CT.PrincipalGuid, dict[CT.SubGuid, Set[CT.AzureRBACRoleGuid]]]
 
-    privileged_principal_guids: Set[CT.PrincipalGuid] = set()
-    #for mg in mgs.values():
-    #    raw_assignments = await get_mg_raw_assignments(args, mg)
-    #    transitive_assignments = await get_transitive_rbac_members(raw_assignments)
-    #    for principalId, roles in transitive_assignments.items():
-    #        if roles & PRIVILEGED_AZURE_ROLE_GUIDS:
-    #            privileged_principal_guids.add(principalId)
+async def get_privileged_azure_principals(args: CT.RunConf) -> Tuple[PrincipalRoles, CT.AzureSubs, CT.AssignedMemberCollection]:
+    subs = await get_subscriptions(args)
+
+    seen_members = {}
+    principal_sub_roles: PrincipalRoles = dict()
+
     for sub in subs.values():
         raw_assignments = await get_sub_raw_assignments(args, sub)
-        transitive_assignments = await get_transitive_rbac_members(args, raw_assignments)
+        transitive_assignments, assigned_members = await get_transitive_rbac_members(args, raw_assignments)
+        seen_members.update(assigned_members)
         for principalId, roles in transitive_assignments.items():
-            if roles & PRIVILEGED_AZURE_ROLE_GUIDS:
-                privileged_principal_guids.add(principalId)
-    # await fetch_azure_queries(args)
-    # mg_roles, sub_roles = fetch_container_roles(args)
-    # principals, principals_to_subs_to_roles, sub_to_roles_to_principals, sub_to_principals_to_roles_to_paths = resolve_roles(args, mg_roles, sub_roles)
-    # return principals_to_subs_to_roles
-    return privileged_principal_guids
+            for priv_role_guid in roles & PRIVILEGED_AZURE_ROLE_GUIDS:
+                principal_sub_roles.setdefault(principalId, {}).setdefault(sub.guid, set()).add(priv_role_guid)
+    return principal_sub_roles, subs, seen_members

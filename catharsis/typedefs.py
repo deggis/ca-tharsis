@@ -1,5 +1,5 @@
 from enum import Enum, auto
-from typing import List, Optional, TypeAlias, NamedTuple, Any
+from typing import List, Optional, Set, TypeAlias, NamedTuple, Mapping, Any
 import json
 import argparse
 from dataclasses import dataclass
@@ -15,7 +15,6 @@ SubGuid: TypeAlias = str
 EntraRoleGuid: TypeAlias = str
 AzureRBACRoleGuid: TypeAlias = str
 MGName: TypeAlias = str
-
 
 # ca-tharsis internal structures
 
@@ -225,6 +224,10 @@ def catharsis_decoder(obj):
       raise Exception('Cannot decode this type: %s' % catharsis_type)
   return obj
 
+
+AzureContainerRoles: TypeAlias = Mapping[PrincipalGuid, Set[AzureRBACRoleGuid]]
+AssignedMemberCollection: TypeAlias = Mapping[PrincipalGuid, AssignedMember]
+AzureSubs: TypeAlias = Mapping[SubGuid, AzureSub]
 
 # to_strings
 
