@@ -2,10 +2,11 @@ from typing import List, Mapping, Optional
 from azure.identity import DefaultAzureCredential
 from azure.mgmt.securityinsight import SecurityInsights
 from azure.mgmt.securityinsight.models import Watchlist
+from azure.core.exceptions import ResourceNotFoundError
 
 from catharsis.graph_query import get_all_service_principals, get_all_users
 from catharsis.ms_credential import get_ms_credential
-from catharsis.typedefs import RunConf
+from catharsis.typedefs import RunConf, principal_to_string
 import catharsis.typedefs as CT
 
 import csv
@@ -44,12 +45,12 @@ async def put_principals_to_watchlist(args: RunConf, watchlist_items: Mapping[CT
     for user_id_chunk in chunk(user_ids, 15):
       user_chunk = await get_all_users(args, user_id_chunk)
       for principal_id, principal in user_chunk.items():
-        watchlist_items[principal_id].principal_displayname = principal.displayName
+        watchlist_items[principal_id].principal_displayname = principal_to_string(principal)
 
     for app_id_chunk in chunk(sp_ids, 15):
       app_chunk = await get_all_service_principals(args, app_id_chunk)
       for principal_id, principal in app_chunk.items():
-        watchlist_items[principal_id].principal_displayname = principal.displayName
+        watchlist_items[principal_id].principal_displayname = principal_to_string(principal)
 
   csv_file = io.StringIO()
   fieldnames = 'User AAD Object Id,principal_type,User Principal Name,entra_roles,azure_roles'.split(',')
@@ -80,7 +81,11 @@ async def put_principals_to_watchlist(args: RunConf, watchlist_items: Mapping[CT
 
   if not args.skip_existing_watchlist_deletion:
     logger.info('Removing previous watchlist %s' % watchlist_alias)
-    sentinel.watchlists.delete(watchlist_rg, watchlist_wsname, watchlist_alias)
+    try:
+      sentinel.watchlists.delete(watchlist_rg, watchlist_wsname, watchlist_alias)
+    except ResourceNotFoundError:
+      # Good. Nothing to clear from our way.
+      pass
 
   # https://learn.microsoft.com/en-us/azure/sentinel/watchlists-manage#bulk-update-a-watchlist
   # When you have many items to add to a watchlist, use bulk update.
