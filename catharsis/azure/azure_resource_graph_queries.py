@@ -69,12 +69,12 @@ async def resource_graph_query(args: RunConf, kql_query: str):
   query = QueryRequest(query=kql_query)
   query.options = QueryRequestOptions(top=1000)
   result = []
-  logger.info('Querying for key: %s', 'key')
+  logger.info('Querying KQL: %s ..', kql_query[:50])
   resp = client.resources(query)
   result.extend(resp.data)
   while resp.skip_token:
     query = QueryRequest(query=SUBSCRIPTIONS_QUERY)
-    logger.info('Querying for key: %s, skip_token: %s...', 'key', resp.skip_token[:50])
+    logger.info('Querying for with skip_token: %s...', resp.skip_token[:50])
     query.options = QueryRequestOptions(skip_token=resp.skip_token)
     resp = client.resources(query)
     result.extend(resp.data)

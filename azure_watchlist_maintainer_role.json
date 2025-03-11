@@ -1,0 +1,17 @@
+{
+    "properties": {
+        "roleName": "ca-tharsis Watchlist maintainer",
+        "description": "",
+        "assignableScopes": [],
+        "permissions": [
+            {
+                "actions": [
+                    "Microsoft.SecurityInsights/watchlists/*"
+                ],
+                "notActions": [],
+                "dataActions": [],
+                "notDataActions": []
+            }
+        ]
+    }
+}
