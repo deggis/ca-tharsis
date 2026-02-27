@@ -90,6 +90,7 @@ class ServicePrincipalType(Enum):
   ManagedIdentity = 'ManagedIdentity'
   Application = 'Application'
   Legacy = 'Legacy'
+  ServiceIdentity = 'ServiceIdentity' # Agent identity https://learn.microsoft.com/en-us/graph/api/resources/agentidentity?view=graph-rest-beta
   # https://learn.microsoft.com/en-us/graph/api/resources/serviceprincipal?view=graph-rest-1.0
   # For 'internal use'
   SocialIdp = 'SocialIdp'
