@@ -2,4 +2,6 @@ pandas==2.2.1
 azure-identity
 azure-mgmt-resourcegraph
 azure-mgmt-securityinsight
+azure-mgmt-resource
+azure-mgmt-authorization
 msgraph-sdk
