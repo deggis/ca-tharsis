@@ -6,7 +6,7 @@ from catharsis.ms_credential import get_ms_credential
 from catharsis.typedefs import RunConf
 from azure.mgmt.resourcegraph.models import QueryRequest
 from azure.mgmt.resourcegraph.models import QueryRequestOptions
-from azure.mgmt.resource import ResourceManagementClient
+from azure.mgmt.resource.resources import ResourceManagementClient
 from azure.mgmt.authorization import AuthorizationManagementClient
 from azure.mgmt.resourcegraph import ResourceGraphClient
 
