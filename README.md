@@ -22,12 +22,12 @@ pip install -r requirements.txt
 # Usage
 
 ```
-mkdir [DATA_DIR]
+mkdir [YOUR_DATA_DIR]
 az login --tenant [TENANT]
-python3 main.py [WORKDIR]
+python3 main.py --persist-cache-dir [YOUR_DATA_DIR]/cache ca-report [YOUR_DATA_DIR]/report
 ```
 
-See output and HTML reports in the workdir (dir will be created if missing).
+See output and HTML reports in the report (dir will be created if missing).
 
 
 # Conditional Access policies
